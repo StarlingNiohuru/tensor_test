@@ -1,6 +1,6 @@
 import sys
 import re
-from numpy import asarray, zeros, random
+from numpy import asarray, zeros, random, append
 from keras.models import Sequential, load_model
 from keras.layers import Dense, LSTM
 from keras.layers.embeddings import Embedding
@@ -18,6 +18,7 @@ BATCH_SIZE = 60
 EMBEDDING_DIM = 256
 DROPOUT = 0.1
 UNIT_NUM = 256
+EPOCHS = 40
 
 
 def load_text():
@@ -26,7 +27,7 @@ def load_text():
         raw_text = f.read()
     # text= ''.join([i if ord(i) < 128 else ' ' for i in raw_text])
     text = raw_text.replace('\r', '').replace('\n', '').replace('\t', '').lower()
-    partern = '[\u4e00-\u9fa5]|[，。！？；：“”《》——【】『』]|[-.%/]|[A-Za-z]+'
+    partern = '[\u4e00-\u9fa5]|[，、。！？；：“”《》——【】『』]|[-.%/]|[A-Za-z]+'
     sequences = re.findall(partern, text)
     vocab_to_int = {}
     num = 0
@@ -53,7 +54,7 @@ def load_train_data_and_labels(vocab_to_int, sequences):
         data.append(x)
         labels.append(y)
     data = asarray(data)
-    labels = to_categorical(asarray(labels))  # labels use one-hot format
+    labels = to_categorical(asarray(labels), num_classes=len(vocab_to_int))  # labels use one-hot format
     print('data X shape: %s' % str(data.shape))
     print('labels y shape (one-hot): %s' % str(labels.shape))
     return data, labels
@@ -93,14 +94,9 @@ def bulid_model(embedding_matrix, vocab_length):
     return model
 
 
-def load_model():
-    model = load_model(MODEL_CHECKPOINT_FILE)
-    return model
-
-
 def train_model(model, data, labels):
-    checkpointer = ModelCheckpoint(filepath=MODEL_CHECKPOINT_FILE, verbose=1, save_best_only=True)
-    model.fit(data, labels, batch_size=BATCH_SIZE, epochs=10, validation_data=None,
+    checkpointer = ModelCheckpoint(filepath=MODEL_CHECKPOINT_FILE, verbose=1, monitor='acc', save_best_only=True)
+    model.fit(data, labels, batch_size=BATCH_SIZE, epochs=EPOCHS,  # validation_split=VALIDATION_SPLIT,
               callbacks=[checkpointer])
 
 
@@ -114,7 +110,7 @@ class GenerateText(Callback):
         generate_text(pre_text, top_n, text_length)
 
 
-def generate_text(pre_text, vocab_to_int, model, top_n=10, text_length=500):
+def generate_text(pre_text, vocab_to_int, model, text_length=500):
     def char_seq_to_int(char_seq):
         char_num_list = []
         for char in char_seq:
@@ -127,14 +123,15 @@ def generate_text(pre_text, vocab_to_int, model, top_n=10, text_length=500):
     input_text = pre_text
     int_list = char_seq_to_int(input_text)
     for i in range(text_length):
-        # input_data = char_seq_to_int(input_text)
-        current_list = int_list[-MAX_SEQUENCE_LENGTH:]
+        current_list = int_list[:, -MAX_SEQUENCE_LENGTH:]
         predict_label = model.predict(current_list)
-        topN_y = predict_label.argsort()[0, -top_n:][::-1]
-        int_list.append(random.choice(topN_y))
-        # pre_char = int_to_vocab[random.choice(topN_y)]
-        # print(pre_char)
-    print(current_list)
+        # topN_y = predict_label.argsort()[0, -top_n:][::-1]
+        # word_choice=random.choice(topN_y)
+        word_choice = random.choice(range(len(predict_label[0])), p=predict_label[0])
+        int_list = append(int_list, [[word_choice]], axis=1)
+    int_to_vocab = {i: c for c, i in vocab_to_int.items()}
+    result_text = ''.join([int_to_vocab[d] for d in int_list[0]])[-text_length:]
+    print(result_text)
 
 
 if __name__ == "__main__":
@@ -147,16 +144,12 @@ if __name__ == "__main__":
     elif sys.argv[1] == 'continue':
         vocab_to_int, sequences = load_text()
         data, labels = load_train_data_and_labels(vocab_to_int, sequences)
-        # model = load_model()
-        # train_model(model, data, labels)
         model = load_model(MODEL_CHECKPOINT_FILE)
-        checkpointer = ModelCheckpoint(filepath=MODEL_CHECKPOINT_FILE, verbose=1, save_best_only=True)
-        model.fit(data, labels, batch_size=BATCH_SIZE, epochs=10, validation_data=None,
-                  callbacks=[checkpointer])
+        train_model(model, data, labels)
     elif sys.argv[1] == 'test':
         vocab_to_int, sequences = load_text()
-        model = load_model()
+        model = load_model(MODEL_CHECKPOINT_FILE)
         # gt = GenerateText(vocab_to_int, model=model)
-        pre_text = u'但如果真是如此，猫科动物也经过演化，为什么没有会微积分的猫？究竟为什么，在整个动物界'
+        pre_text = u'拥有神的能力，但是不负责任、贪得无厌，而且连想要什么都不知道。天下危险，恐怕莫此为甚。'
         # gt.on_batch_end(pre_text=pre_text)
         generate_text(pre_text, vocab_to_int, model)
