@@ -12,13 +12,13 @@ TEXT_DATA_DIR = 'D:/人类简史.txt'
 WORD2VEC_DIR = 'D://word2vec/word2vec_c_test'
 MODEL_CHECKPOINT_FILE = 'D://human_history.hdf5'
 MAX_SEQUENCE_LENGTH = 20
-CHAR_STEP = 5
+CHAR_STEP = 1
 VALIDATION_SPLIT = 0.2
 BATCH_SIZE = 60
 EMBEDDING_DIM = 256
 DROPOUT = 0.1
-UNIT_NUM = 256
-EPOCHS = 40
+OUTPUT_DIM = 256
+EPOCHS = 10
 
 
 def load_text():
@@ -87,7 +87,10 @@ def bulid_model(embedding_matrix, vocab_length):
     model = Sequential()
     model.add(Embedding(vocab_length, EMBEDDING_DIM, weights=[embedding_matrix], input_length=MAX_SEQUENCE_LENGTH,
                         trainable=False))
-    model.add(LSTM(256, input_shape=(MAX_SEQUENCE_LENGTH, vocab_length), dropout=DROPOUT, recurrent_dropout=DROPOUT))
+    model.add(LSTM(OUTPUT_DIM, input_shape=(MAX_SEQUENCE_LENGTH, vocab_length), return_sequences=True, dropout=DROPOUT,
+                   recurrent_dropout=DROPOUT))
+    model.add(LSTM(OUTPUT_DIM, return_sequences=True, dropout=DROPOUT, recurrent_dropout=DROPOUT))
+    model.add(LSTM(OUTPUT_DIM, dropout=DROPOUT, recurrent_dropout=DROPOUT))
     model.add(Dense(vocab_length, activation='softmax'))
     model.compile(loss='categorical_crossentropy', optimizer='rmsprop', metrics=['acc'])
     print(model.summary())
