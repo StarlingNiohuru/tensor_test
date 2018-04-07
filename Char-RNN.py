@@ -9,16 +9,17 @@ from keras.utils.np_utils import to_categorical
 
 # TEXT_DATA_DIR = 'D://A Brief History of Time.txt'
 TEXT_DATA_DIR = 'D:/人类简史.txt'
-WORD2VEC_DIR = 'D://word2vec/word2vec_c_test'
+# WORD2VEC_DIR = 'D://word2vec/word2vec_c_test'
+WORD2VEC_DIR = 'D://word2vec_human.txt'
 MODEL_CHECKPOINT_FILE = 'D://human_history.hdf5'
 MAX_SEQUENCE_LENGTH = 20
 CHAR_STEP = 1
 VALIDATION_SPLIT = 0.2
 BATCH_SIZE = 60
-EMBEDDING_DIM = 256
+EMBEDDING_DIM = 100
 DROPOUT = 0.1
-OUTPUT_DIM = 256
-EPOCHS = 10
+OUTPUT_DIM = 100
+EPOCHS = 30
 
 
 def load_text():
