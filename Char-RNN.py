@@ -83,8 +83,8 @@ def load_embedding_matrix(vocab_to_int):
     return embedding_matrix
 
 
-# bulid a model
-def bulid_model(embedding_matrix, vocab_length):
+# build a model
+def build_model(embedding_matrix, vocab_length):
     model = Sequential()
     model.add(Embedding(vocab_length, EMBEDDING_DIM, weights=[embedding_matrix], input_length=MAX_SEQUENCE_LENGTH,
                         trainable=False))
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         vocab_to_int, sequences = load_text()
         data, labels = load_train_data_and_labels(vocab_to_int, sequences)
         embedding_matrix = load_embedding_matrix(vocab_to_int)
-        model = bulid_model(embedding_matrix, len(vocab_to_int))
+        model = build_model(embedding_matrix, len(vocab_to_int))
         train_model(model, data, labels)
     elif sys.argv[1] == 'continue':
         vocab_to_int, sequences = load_text()
