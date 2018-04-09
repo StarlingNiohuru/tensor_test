@@ -36,14 +36,15 @@ def load_text():
     vocab_length = len(vocab_to_int)
     print('Found %s unique tokens.' % vocab_length)
     # int_to_vocab = {i: c for c, i in vocab_to_int.items()}
+    print('len of total sequences: %s' % len(sequences))
     return vocab_to_int, sequences
 
 
-def load_train_data_and_labels(vocab_to_int, sequences):
-    # load data without generator
+def train_data_generator(vocab_to_int, sequences, batch_size=BATCH_SIZE):
     encoder_input = []
     decoder_input = []
     decoder_target = []
+    count = 0
     for i in range(0, len(sequences) - 2 * MAX_SEQUENCE_LENGTH, CHAR_STEP):
         x_seq = sequences[i:i + MAX_SEQUENCE_LENGTH]
         y_seq = sequences[(i + MAX_SEQUENCE_LENGTH - 1):(i + 2 * MAX_SEQUENCE_LENGTH)]
@@ -52,15 +53,17 @@ def load_train_data_and_labels(vocab_to_int, sequences):
         encoder_input.append(x)
         decoder_input.append(y[:-1])
         decoder_target.append(y[1:])
-    encoder_input_data = asarray(encoder_input)
-    decoder_input_data = asarray(decoder_input)
-    decoder_target_data = to_categorical(asarray(decoder_target),
-                                         num_classes=len(vocab_to_int))  # labels use one-hot format
-    # decoder_target_data = asarray(decoder_target)
-    print('encoder_input_data shape: %s' % str(encoder_input_data.shape))
-    print('decoder_input_data shape: %s' % str(decoder_input_data.shape))
-    print('decoder_target_data shape (one-hot): %s' % str(decoder_target_data.shape))
-    return encoder_input_data, decoder_input_data, decoder_target_data
+        count += 1
+        if count % batch_size == 0:
+            encoder_input_data = asarray(encoder_input[-batch_size:])
+            decoder_input_data = asarray(decoder_input[-batch_size:])
+            decoder_target_data = to_categorical(asarray(decoder_target[-batch_size:]),
+                                                 num_classes=len(vocab_to_int))  # labels use one-hot format
+            # decoder_target_data = asarray(decoder_target)
+            # print('encoder_input_data shape: %s' % str(encoder_input_data.shape))
+            # print('decoder_input_data shape: %s' % str(decoder_input_data.shape))
+            # print('decoder_target_data shape (one-hot): %s' % str(decoder_target_data.shape))
+            yield ([encoder_input_data, decoder_input_data], decoder_target_data)
 
 
 def load_embedding_matrix(vocab_to_int):
@@ -109,35 +112,58 @@ def build_model(embedding_matrix, vocab_length):
     model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
     print(model.summary())
     # Compile & run training
-    model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['acc'])
     return model
 
 
-def train_model(model, encoder_input_data, decoder_input_data, decoder_target_data):
+def train_model(model, data_generator, sequences):
     checkpointer = ModelCheckpoint(filepath=MODEL_CHECKPOINT_FILE, verbose=1, monitor='acc', save_best_only=True)
-    model.fit([encoder_input_data, decoder_input_data], decoder_target_data, batch_size=BATCH_SIZE, epochs=EPOCHS,
-              # validation_split=VALIDATION_SPLIT,
-              callbacks=[checkpointer])
+    model.fit_generator(data_generator,
+                        steps_per_epoch=(len(sequences) - 2 * MAX_SEQUENCE_LENGTH) / CHAR_STEP / BATCH_SIZE,
+                        epochs=EPOCHS, callbacks=[checkpointer])
+
+
+def generate_text(pre_text, vocab_to_int, model, text_length=1):
+    def char_seq_to_int(char_seq):
+        char_num_list = []
+        for char in char_seq:
+            char_num = vocab_to_int[char]
+            # print(char)
+            char_num_list.append(char_num)
+        # print(char_num_list)
+        return asarray([char_num_list])[:, -MAX_SEQUENCE_LENGTH:]
+
+    input_text = pre_text
+    int_list = char_seq_to_int(input_text)
+
+    for i in range(text_length):
+        current_list = int_list[:, -MAX_SEQUENCE_LENGTH:]
+        zero_list = asarray([[0 for i in range(MAX_SEQUENCE_LENGTH)]])
+        predict_label = model.predict([current_list, zero_list])
+        # topN_y = predict_label.argsort()[0, -top_n:][::-1]
+        # word_choice=random.choice(topN_y)
+        for k in range(MAX_SEQUENCE_LENGTH):
+            word_choice = random.choice(range(len(predict_label[0][k])), p=predict_label[0][k])
+            int_list = append(int_list, [[word_choice]], axis=1)
+        int_to_vocab = {i: c for c, i in vocab_to_int.items()}
+        result_text = ''.join([int_to_vocab[d] for d in int_list[0]])
+        print(result_text)
 
 
 if __name__ == "__main__":
     if sys.argv[1] == 'build':
         vocab_to_int, sequences = load_text()
-        encoder_input_data, decoder_input_data, decoder_target_data = load_train_data_and_labels(vocab_to_int,
-                                                                                                 sequences)
+        data_generator = train_data_generator(vocab_to_int, sequences)
         embedding_matrix = load_embedding_matrix(vocab_to_int)
         model = build_model(embedding_matrix, len(vocab_to_int))
-        train_model(model, encoder_input_data, decoder_input_data, decoder_target_data)
+        train_model(model, data_generator, sequences)
     elif sys.argv[1] == 'continue':
         vocab_to_int, sequences = load_text()
-        encoder_input_data, decoder_input_data, decoder_target_data = load_train_data_and_labels(vocab_to_int,
-                                                                                                 sequences)
+        data_generator = train_data_generator(vocab_to_int, sequences)
         model = load_model(MODEL_CHECKPOINT_FILE)
-        train_model(model, encoder_input_data, decoder_input_data, decoder_target_data)
+        train_model(model, data_generator, sequences)
     elif sys.argv[1] == 'test':
         vocab_to_int, sequences = load_text()
         model = load_model(MODEL_CHECKPOINT_FILE)
-        # gt = GenerateText(vocab_to_int, model=model)
         pre_text = u'拥有神的能力，但是不负责任、贪得无厌，而且连想要什么都不知道。天下危险，恐怕莫此为甚。'
-        # gt.on_batch_end(pre_text=pre_text)
-        # generate_text(pre_text, vocab_to_int, model)
+        generate_text(pre_text, vocab_to_int, model)
