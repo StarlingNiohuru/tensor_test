@@ -7,11 +7,13 @@ import numpy as np
 
 class Seq2SeqHandler(object):
 
-    def __init__(self, batch_size=64, epochs=100, latent_dim=256, num_samples=10000, data_path=None, model_path=None):
+    def __init__(self, batch_size=64, epochs=100, latent_dim=256, num_samples=10000, validation_split=0.2,
+                 data_path=None, model_path=None):
         self.batch_size = batch_size  # Batch size for training.
         self.epochs = epochs  # Number of epochs to train for.
         self.latent_dim = latent_dim  # Latent dimensionality of the encoding space.
         self.num_samples = num_samples  # Number of samples to train on.
+        self.validation_split = validation_split
         # Path to the data txt file on disk.
         self.data_path = data_path
         self.model_path = model_path
@@ -51,6 +53,7 @@ class Seq2SeqHandler(object):
                 if char not in target_characters:
                     target_characters.add(char)
 
+        self.num_samples = len(input_texts)
         self.input_characters = sorted(list(input_characters))
         self.target_characters = sorted(list(target_characters))
         self.num_encoder_tokens = len(input_characters)
@@ -58,14 +61,12 @@ class Seq2SeqHandler(object):
         self.max_encoder_seq_length = max([len(txt) for txt in input_texts])
         self.max_decoder_seq_length = max([len(txt) for txt in target_texts])
 
-        print('Number of samples:', len(input_texts))
+        print('Number of samples:', self.num_samples)
         print('Number of unique input tokens:', self.num_encoder_tokens)
         print('Number of unique output tokens:', self.num_decoder_tokens)
         print('Max sequence length for inputs:', self.max_encoder_seq_length)
         print('Max sequence length for outputs:', self.max_decoder_seq_length)
-        return input_texts, target_texts
 
-    def vecotorize_data(self, input_texts, target_texts):
         self.input_token_index = dict(
             [(char, i) for i, char in enumerate(self.input_characters)])
         self.target_token_index = dict(
@@ -78,6 +79,9 @@ class Seq2SeqHandler(object):
         self.reverse_target_char_index = dict(
             (i, char) for char, i in self.target_token_index.items())
 
+        return input_texts, target_texts
+
+    def vecotorize_data(self, input_texts, target_texts):
         encoder_input_data = np.zeros(
             (len(input_texts), self.max_encoder_seq_length, self.num_encoder_tokens),
             dtype='float32')
@@ -99,6 +103,17 @@ class Seq2SeqHandler(object):
                     # and will not include the start character.
                     decoder_target_data[i, t - 1, self.target_token_index[char]] = 1.
         return encoder_input_data, decoder_input_data, decoder_target_data
+
+    def vecotorize_data_generator(self, input_texts, target_texts):
+        count = 0
+        # while count < len(input_texts) - self.batch_size:
+        while True:
+            batch_input = input_texts[count:count + self.batch_size]
+            batch_target = target_texts[count:count + self.batch_size]
+            encoder_input_data, decoder_input_data, decoder_target_data = self.vecotorize_data(batch_input,
+                                                                                               batch_target)
+            yield ([encoder_input_data, decoder_input_data], decoder_target_data)
+            count = count + self.batch_size if count < len(input_texts) + 1 - self.batch_size else 0
 
     def build_training_model(self):
         # Define an input sequence and process it.
@@ -122,19 +137,23 @@ class Seq2SeqHandler(object):
         # Define the model that will turn
         # `encoder_input_data` & `decoder_input_data` into `decoder_target_data`
         self.model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-
         print(self.model.summary())
-
-    def train_model(self, encoder_input_data, decoder_input_data, decoder_target_data):
-        # Run training
         self.model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
-        checkpointer = ModelCheckpoint(filepath=self.model_path, verbose=1, save_best_only=True)
-        earlystopping = EarlyStopping(patience=3, verbose=1)
-        self.model.fit([encoder_input_data, decoder_input_data], decoder_target_data,
-                       batch_size=self.batch_size,
-                       epochs=self.epochs,
-                       validation_split=0.2,
-                       callbacks=[checkpointer, earlystopping])
+
+    def train_model(self, encoder_input_data=None, decoder_input_data=None, decoder_target_data=None, generator=None):
+        # Run training
+        checkpointer = ModelCheckpoint(filepath=self.model_path, monitor='loss', verbose=1, save_best_only=True)
+        earlystopping = EarlyStopping(monitor='loss', patience=3, verbose=1)
+        if generator:
+            self.model.fit_generator(generator=generator, steps_per_epoch=self.num_samples // self.batch_size,
+                                     epochs=self.epochs,
+                                     callbacks=[checkpointer, earlystopping])
+        else:
+            self.model.fit([encoder_input_data, decoder_input_data], decoder_target_data,
+                           batch_size=self.batch_size,
+                           epochs=self.epochs,
+                           validation_split=self.validation_split,
+                           callbacks=[checkpointer, earlystopping])
 
     def restore_model(self):
         self.model = load_model(self.model_path)
@@ -196,28 +215,51 @@ class Seq2SeqHandler(object):
 
         return decoded_sentence
 
+    def generate_text(self, input_char, num_of_sentences=10):
+        total_text = ''
+        for _ in range(num_of_sentences):
+            input_seq = np.zeros((1, self.max_encoder_seq_length, self.num_encoder_tokens), dtype='float32')
+            for t, char in enumerate(input_char):
+                input_seq[0, t, self.input_token_index[char]] = 1.
+            input_char = self.decode_sequence(input_seq).replace('\t', '').replace('\n', '')
+            total_text += input_char
+        return total_text
+
 
 if __name__ == "__main__":
-    sh = Seq2SeqHandler(data_path='D:\datasets\cmn-eng\cmn.txt', model_path='D:\models\e2c.hdf5')
-    if sys.argv[1] in ['build', 'continue', 'test']:
+    sh = Seq2SeqHandler(data_path='D:/datasets/Water Margin pretrain.txt', model_path='D:\models\water_margin.hdf5',
+                        num_samples=10000000)
+    if sys.argv[1] in ['build', 'continue']:
         input_texts, target_texts = sh.load_data()
-        encoder_input_data, decoder_input_data, decoder_target_data = sh.vecotorize_data(input_texts, target_texts)
+        # encoder_input_data, decoder_input_data, decoder_target_data = sh.vecotorize_data(input_texts, target_texts)
+        g = sh.vecotorize_data_generator(input_texts, target_texts)
         if sys.argv[1] == 'build':
             sh.build_training_model()
-            sh.train_model(encoder_input_data, decoder_input_data, decoder_target_data)
+            # sh.train_model(encoder_input_data, decoder_input_data, decoder_target_data)
+            sh.train_model(generator=g)
         elif sys.argv[1] == 'continue':
             sh.restore_model()
-            sh.train_model(encoder_input_data, decoder_input_data, decoder_target_data)
-        elif sys.argv[1] == 'test':
-            # sh.define_sampling_models()
-            sh.restore_model()
-            for seq_index in range(30):
-                # Take one sequence (part of the training set)
-                # for trying out decoding.
-                input_seq = encoder_input_data[seq_index: seq_index + 1]
-                decoded_sentence = sh.decode_sequence(input_seq)
-                print('-')
-                print('Input sentence:', input_texts[seq_index])
-                print('Decoded sentence:', decoded_sentence)
-    elif sys.argv[1] == 'debug':
+            # sh.train_model(encoder_input_data, decoder_input_data, decoder_target_data)
+            sh.train_model(generator=g)
+    elif sys.argv[1] == 'test':
+        sh.load_data()
         sh.restore_model()
+        # for seq_index in range(30):
+        #     Take one sequence (part of the training set)
+        #     for trying out decoding.
+            # encoder_input_data, decoder_input_data, decoder_target_data = sh.vecotorize_data(input_texts, target_texts)
+        #     input_seq = encoder_input_data[seq_index: seq_index + 1]
+        #     decoded_sentence = sh.decode_sequence(input_seq)
+        #     print('-')
+        #     print('Input sentence:', input_texts[seq_index])
+        #     print('Decoded sentence:', decoded_sentence)
+        # sample_text = sh.generate_text(input_char='鲁提辖坐了主位，李忠对席，史进下首坐了。')
+        sample_text = sh.generate_text(input_char='你好。')
+        print(sample_text)
+    elif sys.argv[1] == 'debug':
+        input_texts, target_texts = sh.load_data()
+        g = sh.vecotorize_data_generator(input_texts, target_texts)
+        for i in g:
+            print(i[0].shape)
+            print(i[1].shape)
+            break
