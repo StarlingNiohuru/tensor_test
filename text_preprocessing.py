@@ -7,20 +7,20 @@ def text_to_sentences():
         raw_text = f.read()
     text = raw_text.replace('\t', '').replace('\n\n', '')
     # partern = '“.+?[。！？’…，]”\n*|[^\n“”‘’…].*?[。！？：…；]\n*'
-    partern = '[^\n“”‘’…].*?[。！？：…；]\n*'
+    partern = '[^\n“”‘’…].*?[，。！？：…；]\n*'
     sentences = re.findall(partern, text)
     return sentences
 
 
-def sentences_into_pairs(sentences, max_len=70):
-    print(len(sentences))
+def sentences_into_pairs(sentences, max_len=20):
+    total_count = len(sentences)
     sentences = [s for s in sentences if len(s) < max_len]
-    print(len(sentences))
+    print(len(sentences) / total_count)
     pairs = []
     for s1, s2 in zip(sentences, sentences[1:]):
         line = s1 + '\t' + s2 + '\n'
         pairs.append(line)
-    pretrain_text = 'D:/datasets/Water Margin pretrain.txt'
+    pretrain_text = 'D:/deep_learning/datasets/Water Margin pretrain.txt'
     with open(pretrain_text, 'w', encoding='utf-8') as f:
         f.writelines(pairs)
 

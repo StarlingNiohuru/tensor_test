@@ -227,7 +227,8 @@ class Seq2SeqHandler(object):
 
 
 if __name__ == "__main__":
-    sh = Seq2SeqHandler(data_path='D:/datasets/Water Margin pretrain.txt', model_path='D:\models\water_margin.hdf5',
+    sh = Seq2SeqHandler(data_path='D:/deep_learning/datasets/Water Margin pretrain.txt',
+                        model_path='D:/deep_learning/models/water_margin.hdf5',
                         num_samples=10000000)
     if sys.argv[1] in ['build', 'continue']:
         input_texts, target_texts = sh.load_data()
@@ -247,14 +248,13 @@ if __name__ == "__main__":
         # for seq_index in range(30):
         #     Take one sequence (part of the training set)
         #     for trying out decoding.
-            # encoder_input_data, decoder_input_data, decoder_target_data = sh.vecotorize_data(input_texts, target_texts)
+        # encoder_input_data, decoder_input_data, decoder_target_data = sh.vecotorize_data(input_texts, target_texts)
         #     input_seq = encoder_input_data[seq_index: seq_index + 1]
         #     decoded_sentence = sh.decode_sequence(input_seq)
         #     print('-')
         #     print('Input sentence:', input_texts[seq_index])
         #     print('Decoded sentence:', decoded_sentence)
-        # sample_text = sh.generate_text(input_char='鲁提辖坐了主位，李忠对席，史进下首坐了。')
-        sample_text = sh.generate_text(input_char='你好。')
+        sample_text = sh.generate_text(input_char='他时若遂凌云志，敢笑黄巢不丈夫！', num_of_sentences=1)
         print(sample_text)
     elif sys.argv[1] == 'debug':
         input_texts, target_texts = sh.load_data()
