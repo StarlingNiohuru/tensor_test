@@ -176,7 +176,7 @@ class Seq2SeqHandler(object):
             [decoder_inputs] + decoder_states_inputs,
             [decoder_outputs] + decoder_states)
 
-    def decode_sequence(self, input_seq):
+    def decode_sequence(self, input_seq, sample_type=0):
         # Encode the input as state vectors.
         states_value = self.encoder_model.predict(input_seq)
 
@@ -194,9 +194,12 @@ class Seq2SeqHandler(object):
                 [target_seq] + states_value)
 
             # Sample a token
-            sampled_token_index = np.argmax(output_tokens[0, -1, :])
-            # sampled_token_index = np.random.choice(output_tokens[0, -1, :].argsort()[-3:][::-1])
-            # sampled_token_index = np.random.choice(range(self.num_decoder_tokens), p=output_tokens[0, -1, :])
+            if sample_type == 0:
+                sampled_token_index = np.argmax(output_tokens[0, -1, :])
+            elif sample_type == 1:
+                sampled_token_index = np.random.choice(range(self.num_decoder_tokens), p=output_tokens[0, -1, :])
+            elif sample_type == 2:
+                sampled_token_index = np.random.choice(output_tokens[0, -1, :].argsort()[-3:][::-1])
             sampled_char = self.reverse_target_char_index[sampled_token_index]
             decoded_sentence += sampled_char
 
@@ -219,9 +222,9 @@ class Seq2SeqHandler(object):
         total_text = ''
         for _ in range(num_of_sentences):
             input_seq = np.zeros((1, self.max_encoder_seq_length, self.num_encoder_tokens), dtype='float32')
-            for t, char in enumerate(input_char):
+            for t, char in enumerate(input_char[-self.max_encoder_seq_length:]):
                 input_seq[0, t, self.input_token_index[char]] = 1.
-            input_char = self.decode_sequence(input_seq).replace('\t', '').replace('\n', '')
+            input_char = self.decode_sequence(input_seq, 1).replace('\t', '').replace('\n', '')
             total_text += input_char
         return total_text
 
@@ -254,7 +257,7 @@ if __name__ == "__main__":
         #     print('-')
         #     print('Input sentence:', input_texts[seq_index])
         #     print('Decoded sentence:', decoded_sentence)
-        sample_text = sh.generate_text(input_char='他时若遂凌云志，敢笑黄巢不丈夫！', num_of_sentences=1)
+        sample_text = sh.generate_text(input_char='鲁提辖坐了主位，', num_of_sentences=50)
         print(sample_text)
     elif sys.argv[1] == 'debug':
         input_texts, target_texts = sh.load_data()
