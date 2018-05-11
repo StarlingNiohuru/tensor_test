@@ -1,5 +1,8 @@
 import re
 
+import jieba
+import nltk
+
 
 def text_to_sentences(input_file_dir):
     with open(input_file_dir, 'r', encoding='utf-8') as f:
@@ -44,5 +47,51 @@ def load_pairs_save_one(input_file_dir, output_file_dir):
         f.writelines(lines)
 
 
+def load_pairs_save_two_files(input_file_dir, output_file_dir1, output_file_dir2):
+    with open(input_file_dir, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+        lines1 = [line.split('\t')[0] + '\n' for line in lines]
+        lines2 = [line.split('\t')[1] for line in lines]
+    with open(output_file_dir1, 'w', encoding='utf-8') as f:
+        f.writelines(lines1)
+    with open(output_file_dir2, 'w', encoding='utf-8') as f:
+        f.writelines(lines2)
+
+
+def get_english_vocab(input_file_dir, output_file_dir):
+    with open(input_file_dir, 'r', encoding='utf-8') as f:
+        text = f.read()
+    token_seq = nltk.word_tokenize(text.lower())
+    vocab_list = sorted(list(set(token_seq)))
+    with open(output_file_dir, 'w', encoding='utf-8') as f:
+        f.writelines([word + '\n' for word in vocab_list])
+
+
+def get_chinese_vocab(input_file_dir, output_file_dir):
+    with open(input_file_dir, 'r', encoding='utf-8') as f:
+        text = f.read()
+    token_seq = jieba.cut(text)
+    vocab_list = sorted(list(set(token_seq)))
+    with open(output_file_dir, 'w', encoding='utf-8') as f:
+        f.writelines([word + '\n' for word in vocab_list])
+
+
+def chinese_tokenize(input_file_dir, output_file_dir):
+    with open(input_file_dir, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+        lines1 = [' '.join(jieba.cut(line)) for line in lines]
+    with open(output_file_dir, 'w', encoding='utf-8') as f:
+        f.writelines(lines1)
+
+
 if __name__ == "__main__":
-    load_pairs_save_one('D:/deep_learning/datasets/cmn-eng/cmn.txt', 'D://cntest.txt')
+    # load_pairs_save_one('D:/deep_learning/datasets/cmn-eng/cmn.txt', 'D://cntest.txt')
+    # load_pairs_save_two_files('D:/deep_learning/datasets/cmn-eng/cmn.txt',
+    #                           'D:/deep_learning/datasets/cmn-eng/source.txt',
+    #                           'D:/deep_learning/datasets/cmn-eng/target.txt')
+    # get_english_vocab('D:/deep_learning/datasets/cmn-eng/source.txt',
+    #                   'D:/deep_learning/datasets/cmn-eng/source_vocab.txt')
+    get_chinese_vocab('D:/deep_learning/datasets/cmn-eng/target.txt',
+                      'D:/deep_learning/datasets/cmn-eng/target_vocab.txt')
+    # chinese_tokenize('D:/deep_learning/datasets/cmn-eng/target.txt',
+    #                  'D:/deep_learning/datasets/cmn-eng/target_t.txt')

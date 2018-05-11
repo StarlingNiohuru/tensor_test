@@ -2,6 +2,7 @@ import jieba
 import nltk
 import tensorflow as tf
 import numpy as np
+from tensorflow.python.framework.errors_impl import NotFoundError
 
 
 class Seq2SeqDataLoader(object):
@@ -70,9 +71,9 @@ class Seq2SeqDataLoader(object):
         seq_len_x = list(map(lambda k: len(k), x))
         seq_len_y = list(map(lambda k: len(k), y))
 
-        encoder_input_data = np.zeros((self.batch_size, self.max_encoder_seq_length), dtype='int32')
-        decoder_input_data = np.zeros((self.batch_size, self.max_decoder_seq_length), dtype='int32')
-        decoder_target_data = np.zeros((self.batch_size, self.max_decoder_seq_length), dtype='int32')
+        encoder_input_data = np.zeros((self.batch_size, max(seq_len_x)), dtype='int32')
+        decoder_input_data = np.zeros((self.batch_size, max(seq_len_y)), dtype='int32')
+        decoder_target_data = np.zeros((self.batch_size, max(seq_len_y)), dtype='int32')
 
         for i, (input_text, target_text) in enumerate(zip(x, y)):
             for t, token in enumerate(input_text):
@@ -90,12 +91,13 @@ class Seq2SeqDataLoader(object):
 
 class Seq2SeqAttention(object):
     def __init__(self, batch_size=64, epochs=100, num_samples=10000, embedding_dim=256, num_units=256,
-                 max_gradient_norm=5.0, learning_rate=1.0, input_max_length=20, target_max_length=20):
+                 max_gradient_norm=5.0, learning_rate=1.0, input_max_length=20, target_max_length=20,
+                 model_path="D:/deep_learning/test.ckpt"):
         self.batch_size = batch_size
         self.epochs = epochs
         self.num_samples = num_samples
         self.num_units = num_units
-        # self.model_path = model_path
+        self.model_path = model_path
 
         self.embedding_dim = embedding_dim
         self.input_max_length = input_max_length
@@ -145,7 +147,7 @@ class Seq2SeqAttention(object):
         logits = decoder_outputs.rnn_output
         # loss
         crossent = tf.nn.softmax_cross_entropy_with_logits_v2(labels=decoder_emb_tar, logits=logits)
-        target_weights = tf.sequence_mask(lengths=self.decoder_seq_len, maxlen=self.target_max_length,
+        target_weights = tf.sequence_mask(lengths=self.decoder_seq_len, maxlen=tf.reduce_max(self.decoder_seq_len),
                                           dtype=logits.dtype)
         self.train_loss = (tf.reduce_sum(input_tensor=crossent * target_weights) / self.batch_size)
         params = tf.trainable_variables()
@@ -158,19 +160,37 @@ class Seq2SeqAttention(object):
             merged = tf.summary.merge_all()
             train_writer = tf.summary.FileWriter('D:/deep_learning/graph/test', sess.graph)
 
-    def train(self):
-        self.session = tf.Session()
+    def train(self, train_steps=200, is_restore=1):
         sdl = Seq2SeqDataLoader(file_path_list=['D:\deep_learning\datasets\cmn-eng\cmn.txt'],
                                 batch_size=self.batch_size)
         sdl.load_total_text_data()
-        with self.session as sess:
+        self.saver = tf.train.Saver()
+        with tf.Session() as sess:
+            if is_restore:
+                try:
+                    self.saver.restore(sess, self.model_path)
+                    print("Model restored in path: %s" % self.model_path)
+                except NotFoundError:
+                    print("Model path not found %s" % self.model_path)
             sess.run(tf.global_variables_initializer())
-            for step in range(1, 20 + 1):
+            for step in range(1, train_steps + 1):
                 x, y, yt, input_seq_len, target_seq_len = sdl.next_batch()
                 loss = sess.run(self.train_loss,
                                 feed_dict={self.encoder_inputs: x, self.decoder_inputs: y, self.decoder_targets: yt,
                                            self.encoder_seq_len: input_seq_len, self.decoder_seq_len: target_seq_len})
-                print(loss)
+                print("Step {}: Loss:{}".format(step, loss))
+                save_path = self.saver.save(sess, self.model_path)
+                print("Model saved in path: %s" % save_path)
+
+    def infer(self):
+        # Helper
+        helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(embedding_decoder, tf.fill([self.batch_size], '\t'), '\n')
+        # Decoder
+        decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell, helper, encoder_state)
+        # Dynamic decoding
+        maximum_iterations = tf.round(tf.reduce_max(source_sequence_length) * 2)
+        outputs, _ = tf.contrib.seq2seq.dynamic_decode(decoder, maximum_iterations=maximum_iterations)
+        translations = outputs.sample_id
 
 
 if __name__ == "__main__":
