@@ -70,8 +70,9 @@ def get_english_vocab(input_file_dir, output_file_dir):
 def get_chinese_vocab(input_file_dir, output_file_dir):
     with open(input_file_dir, 'r', encoding='utf-8') as f:
         text = f.read()
-    token_seq = jieba.cut(text)
-    vocab_list = sorted(list(set(token_seq)))
+    # token_seq = jieba.cut(text)
+    # vocab_list = sorted(list(set(token_seq)))
+    vocab_list = sorted(list(set(text)))
     with open(output_file_dir, 'w', encoding='utf-8') as f:
         f.writelines([word + '\n' for word in vocab_list])
 
@@ -79,7 +80,8 @@ def get_chinese_vocab(input_file_dir, output_file_dir):
 def chinese_tokenize(input_file_dir, output_file_dir):
     with open(input_file_dir, 'r', encoding='utf-8') as f:
         lines = f.readlines()
-        lines1 = [' '.join(jieba.cut(line)) for line in lines]
+        # lines1 = [' '.join(jieba.cut(line)) for line in lines]
+        lines1 = [' '.join(list(line)) for line in lines]
     with open(output_file_dir, 'w', encoding='utf-8') as f:
         f.writelines(lines1)
 
@@ -91,7 +93,7 @@ if __name__ == "__main__":
     #                           'D:/deep_learning/datasets/cmn-eng/target.txt')
     # get_english_vocab('D:/deep_learning/datasets/cmn-eng/source.txt',
     #                   'D:/deep_learning/datasets/cmn-eng/source_vocab.txt')
-    get_chinese_vocab('D:/deep_learning/datasets/cmn-eng/target.txt',
-                      'D:/deep_learning/datasets/cmn-eng/target_vocab.txt')
-    # chinese_tokenize('D:/deep_learning/datasets/cmn-eng/target.txt',
-    #                  'D:/deep_learning/datasets/cmn-eng/target_t.txt')
+    # get_chinese_vocab('D:/deep_learning/datasets/cmn-eng/target.txt',
+    #                   'D:/deep_learning/datasets/cmn-eng/target_vocab.txt')
+    chinese_tokenize('D:/deep_learning/datasets/cmn-eng/target.txt',
+                     'D:/deep_learning/datasets/cmn-eng/target_t.txt')
