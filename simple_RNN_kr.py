@@ -29,16 +29,15 @@ class SimpleRNNDataLoader(Sequence):
         self.embedding_matrix = None
         self.language = language
 
-        if self.vocab_path:
+        if self.vocab_path and self.embedding_path:
             try:
                 self.load_vocab()
             except FileNotFoundError:
                 self.create_vocab_file()
+            self.load_embedding_matrix()
         else:
             self.load_character_vocab()
-        self.load_embedding_matrix()
-        # int_seq = self.text_preprocessing()
-        # self.generator = self.build_generator(int_seq)
+            self.load_one_hot_matrix()
 
     def load_character_vocab(self):
         with open(self.text_path, 'r', encoding='utf-8') as f:
@@ -71,11 +70,14 @@ class SimpleRNNDataLoader(Sequence):
     def text_preprocessing(self):
         with open(self.text_path, 'r', encoding='utf-8') as f:
             text = f.read()
-        if self.language == 'English':
-            text_sequences = nltk.word_tokenize(text.lower())
-        elif self.language == 'Chinese':
-            text = text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
-            text_sequences = jieba.cut(text)
+        if self.vocab_path and self.embedding_path:
+            if self.language == 'English':
+                text_sequences = nltk.word_tokenize(text.lower())
+            elif self.language == 'Chinese':
+                text = text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
+                text_sequences = jieba.cut(text)
+        else:
+            text_sequences = text
         int_sequences = [self.vocab_to_int[token] for token in text_sequences]
         self.num_samples = (len(int_sequences) - self.sequence_length) // self.token_step
         print('Number of samples:', self.num_samples)
@@ -83,28 +85,29 @@ class SimpleRNNDataLoader(Sequence):
 
     def load_embedding_matrix(self):
         embeddings_index = dict()
-        if self.embedding_path:
-            with open(self.embedding_path, 'r', encoding='UTF-8') as f:
-                lines = f.readlines()
-            for line in lines:
-                values = line.split()
-                token = values[0]
-                vector = np.array(values[1:], dtype='float32')
-                embeddings_index[token] = vector
-            self.embedding_dim = len(values) - 1
-            print('Loaded {} word vectors. Dimension is {}'.format(len(embeddings_index), self.embedding_dim))
-            self.embedding_matrix = np.zeros((len(self.vocab_to_int), self.embedding_dim))
-            for token, num in self.vocab_to_int.items():
-                embedding_vector = embeddings_index.get(token)
-                if embedding_vector is not None:
-                    self.embedding_matrix[num] = embedding_vector
-            print('embedding_matrix shape: %s' % str(self.embedding_matrix.shape))
-        else:
-            self.embedding_dim = len(self.vocab_to_int)
-            print('No embedding path. Use one-hot encoding. Dimension is {}'.format(self.embedding_dim))
-            self.embedding_matrix = np.zeros((len(self.vocab_to_int), self.embedding_dim))
-            for _, num in self.vocab_to_int.items():
-                self.embedding_matrix[num, num] = 1
+        with open(self.embedding_path, 'r', encoding='UTF-8') as f:
+            lines = f.readlines()
+        for line in lines:
+            values = line.split()
+            token = values[0]
+            vector = np.array(values[1:], dtype='float32')
+            embeddings_index[token] = vector
+        self.embedding_dim = len(values) - 1
+        print('Loaded {} word vectors. Dimension is {}'.format(len(embeddings_index), self.embedding_dim))
+        self.embedding_matrix = np.zeros((len(self.vocab_to_int), self.embedding_dim))
+        for token, num in self.vocab_to_int.items():
+            embedding_vector = embeddings_index.get(token)
+            if embedding_vector is not None:
+                self.embedding_matrix[num] = embedding_vector
+        print('embedding_matrix shape: %s' % str(self.embedding_matrix.shape))
+        return self.embedding_matrix
+
+    def load_one_hot_matrix(self):
+        self.embedding_dim = len(self.vocab_to_int)
+        print('No embedding path. Use one-hot encoding. Dimension is {}'.format(self.embedding_dim))
+        self.embedding_matrix = np.zeros((len(self.vocab_to_int), self.embedding_dim))
+        for _, num in self.vocab_to_int.items():
+            self.embedding_matrix[num, num] = 1
         return self.embedding_matrix
 
     def build_generator(self, int_sequences):
@@ -135,11 +138,11 @@ class SimpleRNNDataLoader(Sequence):
 
 
 class SimpleRNNModel(object):
-    def __init__(self, model_path, batch_size=64, epochs=100,
+    def __init__(self, model_path, batch_size=64, epochs=100, output_dim=256,
                  dropout=0.1, data_loader: SimpleRNNDataLoader = None):
         self.batch_size = batch_size
         self.epochs = epochs
-        self.output_dim = None
+        self.output_dim = output_dim
         self.dropout = dropout
         self.data_loader = data_loader
         self.model = None
@@ -149,7 +152,6 @@ class SimpleRNNModel(object):
 
     def build_model(self):
         vocab_length = len(self.data_loader.vocab_to_int)
-        self.output_dim = self.data_loader.embedding_dim
         self.model = Sequential()
         self.model.add(
             LSTM(units=self.output_dim, input_shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim),
@@ -214,7 +216,8 @@ class SimpleRNNModel(object):
 if __name__ == "__main__":
     dl = SimpleRNNDataLoader(text_path='D:\deep_learning\datasets/骆驼祥子.txt',
                              embedding_path='D:\deep_learning\word2vec\word2vec_c_test',
-                             vocab_path='D:\deep_learning\datasets/骆驼祥子_vocab.txt', language='Chinese')
+                             vocab_path='D:\deep_learning\datasets/骆驼祥子_vocab.txt',
+                             language='Chinese')
     mp = 'D:\deep_learning\models/camel.hdf5'
     rm = SimpleRNNModel(model_path=mp, data_loader=dl)
     if sys.argv[1] == 'train':
