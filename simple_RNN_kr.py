@@ -3,12 +3,13 @@ import sys
 
 import jieba
 import nltk
-from keras import Sequential
+from keras import Input, Model
 from keras.callbacks import ModelCheckpoint, EarlyStopping
-from keras.layers import Embedding, LSTM, Dense
+from keras.layers import LSTM, Dense
 import numpy as np
 from keras.models import load_model
-from keras.utils import Sequence
+from keras.utils import Sequence, multi_gpu_model
+from tensorflow.python.client import device_lib
 
 
 class SimpleRNNDataLoader(Sequence):
@@ -149,14 +150,25 @@ class SimpleRNNModel(object):
         self.model_path = model_path
         self.embedding_path = None
         self.embedding_matrix = None
+        self.gpu_num = None
+
+        self.get_gpu_num()
+
+    def get_gpu_num(self):
+        self.gpu_num = len([info for info in device_lib.list_local_devices() if info.device_type == 'GPU'])
+        return self.gpu_num
 
     def build_model(self):
         vocab_length = len(self.data_loader.vocab_to_int)
-        self.model = Sequential()
-        self.model.add(
-            LSTM(units=self.output_dim, input_shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim),
-                 dropout=self.dropout, recurrent_dropout=self.dropout))
-        self.model.add(Dense(units=vocab_length, activation='softmax'))
+        input_layer = Input(shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim))
+        lstm = LSTM(units=self.output_dim,
+                    input_shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim),
+                    dropout=self.dropout, recurrent_dropout=self.dropout)(input_layer)
+        dense = Dense(units=vocab_length, activation='softmax')(lstm)
+        if self.gpu_num == 0:
+            self.model = Model(inputs=input_layer, outputs=dense)
+        else:
+            self.model = multi_gpu_model(model=Model(inputs=input_layer, outputs=dense), gpus=self.gpu_num)
         self.model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
         print(self.model.summary())
 
