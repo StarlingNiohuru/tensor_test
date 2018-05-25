@@ -13,11 +13,12 @@ from tensorflow.python.client import device_lib
 
 
 class SimpleRNNDataLoader(Sequence):
-    def __init__(self, text_path, vocab_path=None, embedding_path=None, batch_size=64, sequence_length=20,
-                 token_step=3, language='English'):
+    def __init__(self, text_path, vocab_path=None, embedding_path=None, int_seq_path=None, batch_size=64,
+                 sequence_length=20, token_step=3, language='English'):
         self.text_path = text_path
         self.vocab_path = vocab_path
         self.embedding_path = embedding_path
+        self.int_seq_path = int_seq_path
         self.batch_size = batch_size
         self.sequence_length = sequence_length
         self.token_step = token_step
@@ -45,14 +46,14 @@ class SimpleRNNDataLoader(Sequence):
             lines = sorted(list(set(f.read())))
         self.vocab_to_int = {token: num for num, token in enumerate(lines)}
         self.int_to_vocab = {num: token for num, token in enumerate(lines)}
-        print('No vocab path. Loaded {} of character vocabs:'.format(len(self.vocab_to_int)))
+        print('No vocab path. Loaded {} of character vocabs:'.format(len(self.int_to_vocab)))
 
     def load_vocab(self):
         with open(self.vocab_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         self.vocab_to_int = {token.strip().lower(): num for num, token in enumerate(lines)}
         self.int_to_vocab = {num: token.strip().lower() for num, token in enumerate(lines)}
-        print('Loaded {} of vocabs:'.format(len(self.vocab_to_int)))
+        print('Loaded {} of vocabs:'.format(len(self.int_to_vocab)))
 
     def create_vocab_file(self):
         with open(self.text_path, 'r', encoding='utf-8') as f:
@@ -79,9 +80,27 @@ class SimpleRNNDataLoader(Sequence):
                 text_sequences = jieba.cut(text)
         else:
             text_sequences = text
-        int_sequences = [self.vocab_to_int[token] for token in text_sequences]
+        # int_sequences = [self.vocab_to_int[token] for token in text_sequences]
+        int_sequences = []
+        for token in text_sequences:
+            num = self.vocab_to_int.get(token)
+            if num:
+                int_sequences.append(num)
         self.num_samples = (len(int_sequences) - self.sequence_length) // self.token_step
         print('Number of samples:', self.num_samples)
+        return int_sequences
+
+    def save_int_seq_file(self, int_sequences):
+        with open(self.int_seq_path, 'w', encoding='utf-8') as f:
+            f.write(','.join(list(map(lambda x: str(x), int_sequences))))
+        print('Created the int seq file in {}.'.format(self.int_seq_path))
+
+    def load_int_seq_file(self):
+        with open(self.int_seq_path, 'r', encoding='utf-8') as f:
+            raw = f.read()
+        int_sequences = list(map(lambda x: int(x), raw.split(',')))
+        self.num_samples = (len(int_sequences) - self.sequence_length) // self.token_step
+        print('Load int seq data from {}.Number of samples {}:'.format(self.int_seq_path, self.num_samples))
         return int_sequences
 
     def load_embedding_matrix(self):
@@ -90,13 +109,15 @@ class SimpleRNNDataLoader(Sequence):
             lines = f.readlines()
         for line in lines:
             values = line.split()
+            if len(values) < 3:
+                continue
             token = values[0]
             vector = np.array(values[1:], dtype='float32')
             embeddings_index[token] = vector
         self.embedding_dim = len(values) - 1
         print('Loaded {} word vectors. Dimension is {}'.format(len(embeddings_index), self.embedding_dim))
-        self.embedding_matrix = np.zeros((len(self.vocab_to_int), self.embedding_dim))
-        for token, num in self.vocab_to_int.items():
+        self.embedding_matrix = np.zeros((len(self.int_to_vocab), self.embedding_dim))
+        for num, token in self.int_to_vocab.items():
             embedding_vector = embeddings_index.get(token)
             if embedding_vector is not None:
                 self.embedding_matrix[num] = embedding_vector
@@ -104,23 +125,24 @@ class SimpleRNNDataLoader(Sequence):
         return self.embedding_matrix
 
     def load_one_hot_matrix(self):
-        self.embedding_dim = len(self.vocab_to_int)
+        self.embedding_dim = len(self.int_to_vocab)
         print('No embedding path. Use one-hot encoding. Dimension is {}'.format(self.embedding_dim))
-        self.embedding_matrix = np.zeros((len(self.vocab_to_int), self.embedding_dim))
-        for _, num in self.vocab_to_int.items():
+        self.embedding_matrix = np.zeros((len(self.int_to_vocab), self.embedding_dim))
+        for num, _ in self.int_to_vocab.items():
             self.embedding_matrix[num, num] = 1
         return self.embedding_matrix
 
     def build_generator(self, int_sequences):
         while True:
             input_data = []  # input shape:(batch_size, sequence_length, embedding_dim)
-            target_data = []  # target use one-hot,shape:(batch_size, vocab_size)
+            target_data = []  # target shape:(batch_size, 1)
             for sample in range(self.batch_size):
                 try:
                     target = int_sequences[self.pointer + self.sequence_length]
                     inputs = int_sequences[self.pointer:self.pointer + self.sequence_length]
-                    target_data.append([0] * len(self.vocab_to_int))
-                    target_data[-1][target] = 1
+                    # target_data.append([0] * len(self.vocab_to_int))
+                    # target_data[-1][target] = 1
+                    target_data.append([target])
                     input_data.append([[]] * self.sequence_length)
                     for time_step, num in enumerate(inputs):
                         input_data[-1][time_step] = self.embedding_matrix[num]
@@ -136,6 +158,15 @@ class SimpleRNNDataLoader(Sequence):
 
     def __getitem__(self, int_sequences):
         self.build_generator(int_sequences)
+
+    def load_data_and_build_generator(self):
+        if self.int_seq_path and os.path.exists(self.int_seq_path):
+            int_seq = self.load_int_seq_file()
+        else:
+            int_seq = self.text_preprocessing()
+            if self.int_seq_path:
+                self.save_int_seq_file(int_seq)
+        self.generator = self.build_generator(int_seq)
 
 
 class SimpleRNNModel(object):
@@ -169,7 +200,7 @@ class SimpleRNNModel(object):
             self.model = Model(inputs=input_layer, outputs=dense)
         else:
             self.model = multi_gpu_model(model=Model(inputs=input_layer, outputs=dense), gpus=self.gpu_num)
-        self.model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
+        self.model.compile(loss='sparse_categorical_crossentropy', optimizer='rmsprop')
         print(self.model.summary())
 
     def restore_model(self, model_path):
@@ -227,14 +258,14 @@ class SimpleRNNModel(object):
 
 if __name__ == "__main__":
     dl = SimpleRNNDataLoader(text_path='D:\deep_learning\datasets/骆驼祥子.txt',
-                             embedding_path='D:\deep_learning\word2vec\word2vec_c_test',
+                             embedding_path='D:\deep_learning\word2vec\word2vec_c',
                              vocab_path='D:\deep_learning\datasets/骆驼祥子_vocab.txt',
+                             int_seq_path='D:\deep_learning\datasets/骆驼祥子_intseq.txt',
                              language='Chinese')
     mp = 'D:\deep_learning\models/camel.hdf5'
     rm = SimpleRNNModel(model_path=mp, data_loader=dl)
     if sys.argv[1] == 'train':
-        int_seq = dl.text_preprocessing()
-        dl.generator = dl.build_generator(int_seq)
+        dl.load_data_and_build_generator()
         if os.path.exists(mp):
             rm.restore_model(mp)
         rm.build_model()
