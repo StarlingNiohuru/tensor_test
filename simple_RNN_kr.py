@@ -14,7 +14,7 @@ from tensorflow.python.client import device_lib
 
 class SimpleRNNDataLoader(Sequence):
     def __init__(self, text_path, vocab_path=None, embedding_path=None, int_seq_path=None, batch_size=64,
-                 sequence_length=20, token_step=3, language='English'):
+                 sequence_length=20, token_step=3, language='English', character_based=False):
         self.text_path = text_path
         self.vocab_path = vocab_path
         self.embedding_path = embedding_path
@@ -30,15 +30,22 @@ class SimpleRNNDataLoader(Sequence):
         self.embedding_dim = None
         self.embedding_matrix = None
         self.language = language
+        self.character_based = character_based
 
-        if self.vocab_path and self.embedding_path:
+        if self.vocab_path:
             try:
                 self.load_vocab()
             except FileNotFoundError:
                 self.create_vocab_file()
+        else:
+            if self.character_based:
+                self.load_character_vocab()
+            else:
+                self.load_vocab()
+            self.create_vocab_file()
+        if self.embedding_path:
             self.load_embedding_matrix()
         else:
-            self.load_character_vocab()
             self.load_one_hot_matrix()
 
     def load_character_vocab(self):
@@ -58,11 +65,14 @@ class SimpleRNNDataLoader(Sequence):
     def create_vocab_file(self):
         with open(self.text_path, 'r', encoding='utf-8') as f:
             text = f.read()
-        if self.language == 'English':
-            token_seq = nltk.word_tokenize(text.lower())
-        elif self.language == 'Chinese':
-            text = text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
-            token_seq = jieba.cut(text)
+        if self.character_based:
+            token_seq = text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
+        else:
+            if self.language == 'English':
+                token_seq = nltk.word_tokenize(text.lower())
+            elif self.language == 'Chinese':
+                text = text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
+                token_seq = jieba.cut(text)
         vocab_list = sorted(list(set(token_seq)))
         with open(self.vocab_path, 'w', encoding='utf-8') as f:
             f.writelines([word + '\n' for word in vocab_list])
@@ -72,7 +82,7 @@ class SimpleRNNDataLoader(Sequence):
     def text_preprocessing(self):
         with open(self.text_path, 'r', encoding='utf-8') as f:
             text = f.read()
-        if self.vocab_path and self.embedding_path:
+        if not self.character_based:
             if self.language == 'English':
                 text_sequences = nltk.word_tokenize(text.lower())
             elif self.language == 'Chinese':
@@ -261,7 +271,9 @@ if __name__ == "__main__":
                              embedding_path='D:\deep_learning\word2vec\word2vec_c',
                              vocab_path='D:\deep_learning\datasets/骆驼祥子_vocab.txt',
                              int_seq_path='D:\deep_learning\datasets/骆驼祥子_intseq.txt',
-                             language='Chinese')
+                             language='Chinese',
+                             batch_size=64,
+                             character_based=True)
     mp = 'D:\deep_learning\models/camel.hdf5'
     rm = SimpleRNNModel(model_path=mp, data_loader=dl)
     if sys.argv[1] == 'train':
