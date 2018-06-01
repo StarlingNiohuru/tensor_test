@@ -180,9 +180,9 @@ class SimpleRNNDataLoader(Sequence):
 
 
 class SimpleRNNModel(object):
-    def __init__(self, model_path, batch_size=64, epochs=100, output_dim=256,
+    def __init__(self, model_path, epochs=100, output_dim=256,
                  dropout=0.1, data_loader: SimpleRNNDataLoader = None):
-        self.batch_size = batch_size
+        # self.batch_size = batch_size
         self.epochs = epochs
         self.output_dim = output_dim
         self.dropout = dropout
@@ -222,7 +222,7 @@ class SimpleRNNModel(object):
         checkpointer = ModelCheckpoint(filepath=self.model_path, verbose=1, monitor='loss', save_best_only=True)
         earlystopping = EarlyStopping(monitor='loss', patience=5, verbose=1)
         self.model.fit_generator(generator=self.data_loader.generator, shuffle=True,
-                                 steps_per_epoch=self.data_loader.num_samples // self.batch_size,
+                                 steps_per_epoch=self.data_loader.num_samples // self.data_loader.batch_size,
                                  epochs=self.epochs, callbacks=[checkpointer, earlystopping])
 
     def generate_text(self, pre_text, text_length=1000, sample_type='random_choice'):
@@ -272,7 +272,8 @@ if __name__ == "__main__":
                              vocab_path='D:\deep_learning\datasets/骆驼祥子_vocab.txt',
                              int_seq_path='D:\deep_learning\datasets/骆驼祥子_intseq.txt',
                              language='Chinese',
-                             batch_size=64,
+                             batch_size=128,
+                             token_step=1,
                              character_based=True)
     mp = 'D:\deep_learning\models/camel.hdf5'
     rm = SimpleRNNModel(model_path=mp, data_loader=dl)

@@ -3,7 +3,7 @@ import numpy as np
 # Import MNIST data
 from tensorflow.examples.tutorials.mnist import input_data
 
-mnist = input_data.read_data_sets("/tmp/data/", one_hot=True)
+mnist = input_data.read_data_sets("D:\deep_learning\datasets\mnist.npz", one_hot=True)
 
 
 class DCGAN(object):
@@ -101,3 +101,9 @@ class DCGAN(object):
                              self.disc_target: batch_disc_y, self.gen_target: batch_gen_y}
                 _, _, gl, dl = sess.run([self.train_gen, self.train_disc, self.gen_loss, self.disc_loss],
                                         feed_dict=feed_dict)
+                print(gl, dl)
+
+
+if __name__ == "__main__":
+    dg = DCGAN()
+    dg.train_model()
