@@ -227,15 +227,15 @@ class SimpleRNNModel(object):
 
     def generate_text(self, pre_text, text_length=1000, sample_type='random_choice'):
         token_num_seq = []
-        # tokenize
-        if self.data_loader.language == 'English':
-            input_token_seq = nltk.word_tokenize(pre_text.lower())
-            delimiter = ' '
-        elif self.data_loader.language == 'Chinese':
-            pre_text = pre_text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
-            input_token_seq = [word for word in jieba.cut(pre_text)]
-
-            delimiter = ''
+        if not self.data_loader.character_based:
+            # tokenize
+            if self.data_loader.language == 'English':
+                input_token_seq = nltk.word_tokenize(pre_text.lower())
+                delimiter = ' '
+            elif self.data_loader.language == 'Chinese':
+                pre_text = pre_text.lower().replace('\t', '').replace('\n', '').replace(' ', '').replace('\u3000', '')
+                input_token_seq = [word for word in jieba.cut(pre_text)]
+                delimiter = ''
         else:
             input_token_seq = list(pre_text)
             delimiter = ''
@@ -281,7 +281,8 @@ if __name__ == "__main__":
         dl.load_data_and_build_generator()
         if os.path.exists(mp):
             rm.restore_model(mp)
-        rm.build_model()
+        else:
+            rm.build_model()
         rm.train_model()
     elif sys.argv[1] == 'test':
         rm.restore_model(mp)

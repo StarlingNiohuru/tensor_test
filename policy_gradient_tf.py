@@ -5,6 +5,7 @@ import sys
 import gym
 import numpy as np
 import tensorflow as tf
+from matplotlib import pyplot as plt
 
 
 class PolicyEstimator(object):
@@ -56,11 +57,11 @@ class PolicyEstimator(object):
 
 class ValueEstimator(object):
 
-    def __init__(self, env, session=tf.Session(), learning_rate=0.1):
+    def __init__(self, env, session=tf.Session(), learning_rate=0.1, latent_dim=10):
         self.env = env
         self.session = session
         self.learning_rate = learning_rate
-        # self.latent_dim = latent_dim
+        self.latent_dim = latent_dim
         self.observation = None
         self.target = None
         self.value_estimate = None
@@ -72,7 +73,9 @@ class ValueEstimator(object):
             self.observation = tf.placeholder(shape=(None, self.env.observation_space.shape[0]), dtype=tf.float32)
             self.target = tf.placeholder(shape=(None,), dtype=tf.float32)
 
-            output = tf.layers.dense(inputs=self.observation, units=1,
+            hidden = tf.layers.dense(inputs=self.observation, units=self.latent_dim, activation=tf.nn.tanh,
+                                     kernel_initializer=tf.random_normal_initializer())
+            output = tf.layers.dense(inputs=hidden, units=1,
                                      kernel_initializer=tf.random_normal_initializer())
             self.value_estimate = tf.squeeze(output)
 
@@ -94,6 +97,25 @@ class ValueEstimator(object):
         feed_dict = {self.observation: observation, self.target: target}
         _, loss = self.session.run([self.train_op, self.loss], feed_dict)
         return loss
+
+
+def plot_episode_stats(stats, output_dir):
+    # Plot the episode length over time
+    fig1 = plt.figure(figsize=(10, 5))
+    plt.plot(stats.episode_lengths)
+    plt.xlabel("Episode")
+    plt.ylabel("Episode Length")
+    plt.title("Episode Length over Time")
+    fig1.savefig(output_dir + '/fig1.png', dpi=fig1.dpi)
+
+    # Plot the episode reward over time
+    fig2 = plt.figure(figsize=(10, 5))
+    plt.plot(stats.episode_rewards)
+    plt.xlabel("Episode")
+    plt.ylabel("Episode Rewards")
+    plt.title("Episode Reward over Time")
+    fig2.savefig(output_dir + '/fig2.png', dpi=fig2.dpi)
+    return fig1, fig2
 
 
 def actor_critic(env, policy_estimator, value_estimator, num_episodes, discount_factor=0.9, render=False):
@@ -125,7 +147,7 @@ def actor_critic(env, policy_estimator, value_estimator, num_episodes, discount_
             policy_estimator.update(observation, action, td_error)
 
             print("Step {} of Episode {}/{} (Rewards {})".format(step, i_episode + 1, num_episodes,
-                                                                 stats.episode_rewards[i_episode - 1]))
+                                                                 stats.episode_rewards[i_episode]))
             if done:
                 break
             observation = next_observation
@@ -135,6 +157,7 @@ def actor_critic(env, policy_estimator, value_estimator, num_episodes, discount_
 
 if __name__ == "__main__":
     env = gym.make('CartPole-v0')
+    # env = gym.make('MountainCar-v0')
     if sys.argv[1] == 'train':
         with tf.Session() as sess:
             pe = PolicyEstimator(env=env, session=sess)
@@ -142,7 +165,8 @@ if __name__ == "__main__":
             ve = ValueEstimator(env=env, session=sess)
             ve.build_value_estimator()
             sess.run(tf.global_variables_initializer())
-            actor_critic(env, pe, ve, 1000)
+            stats = actor_critic(env, pe, ve, 10000)
+            plot_episode_stats(stats, 'D:\deep_learning\samples')
     elif sys.argv[1] == 'test':
         env.reset()
         olist = []
