@@ -14,7 +14,7 @@ from tensorflow.python.client import device_lib
 
 class SimpleRNNDataLoader(Sequence):
     def __init__(self, text_path, vocab_path=None, embedding_path=None, int_seq_path=None, batch_size=64,
-                 sequence_length=20, token_step=3, language='English', character_based=False):
+                 sequence_length=100, token_step=1, language='English', character_based=False):
         self.text_path = text_path
         self.vocab_path = vocab_path
         self.embedding_path = embedding_path
@@ -180,9 +180,7 @@ class SimpleRNNDataLoader(Sequence):
 
 
 class SimpleRNNModel(object):
-    def __init__(self, model_path, epochs=100, output_dim=256,
-                 dropout=0.1, data_loader: SimpleRNNDataLoader = None):
-        # self.batch_size = batch_size
+    def __init__(self, model_path, epochs=100, output_dim=512, dropout=0.1, data_loader: SimpleRNNDataLoader = None):
         self.epochs = epochs
         self.output_dim = output_dim
         self.dropout = dropout
@@ -202,10 +200,16 @@ class SimpleRNNModel(object):
     def build_model(self):
         vocab_length = len(self.data_loader.vocab_to_int)
         input_layer = Input(shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim))
-        lstm = LSTM(units=self.output_dim,
-                    input_shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim),
-                    dropout=self.dropout, recurrent_dropout=self.dropout)(input_layer)
-        dense = Dense(units=vocab_length, activation='softmax')(lstm)
+        lstm1 = LSTM(units=self.output_dim, return_sequences=True,
+                     input_shape=(self.data_loader.sequence_length, self.data_loader.embedding_dim),
+                     dropout=self.dropout, recurrent_dropout=self.dropout)(input_layer)
+        lstm2 = LSTM(units=self.output_dim, return_sequences=True,
+                     input_shape=(self.data_loader.sequence_length, self.output_dim),
+                     dropout=self.dropout, recurrent_dropout=self.dropout)(lstm1)
+        lstm3 = LSTM(units=self.output_dim,
+                     input_shape=(self.data_loader.sequence_length, self.output_dim),
+                     dropout=self.dropout, recurrent_dropout=self.dropout)(lstm2)
+        dense = Dense(units=vocab_length, activation='softmax')(lstm3)
         if self.gpu_num == 0:
             self.model = Model(inputs=input_layer, outputs=dense)
         else:
@@ -220,12 +224,20 @@ class SimpleRNNModel(object):
 
     def train_model(self):
         checkpointer = ModelCheckpoint(filepath=self.model_path, verbose=1, monitor='loss', save_best_only=True)
-        earlystopping = EarlyStopping(monitor='loss', patience=5, verbose=1)
+        earlystopping = EarlyStopping(monitor='loss', patience=3, verbose=1)
         self.model.fit_generator(generator=self.data_loader.generator, shuffle=True,
                                  steps_per_epoch=self.data_loader.num_samples // self.data_loader.batch_size,
                                  epochs=self.epochs, callbacks=[checkpointer, earlystopping])
 
-    def generate_text(self, pre_text, text_length=1000, sample_type='random_choice'):
+    def generate_text(self, pre_text, text_length=1000, temperature=1.0, sample_type='random_choice'):
+        def temperature_adjusted(preds, temperature=temperature):
+            preds = np.asarray(preds).astype('float64')
+            preds = np.log(preds) / temperature
+            exp_preds = np.exp(preds)
+            preds = exp_preds / np.sum(exp_preds)
+            # probas = np.random.multinomial(1, preds, 1)
+            return preds
+
         token_num_seq = []
         if not self.data_loader.character_based:
             # tokenize
@@ -245,20 +257,21 @@ class SimpleRNNModel(object):
             token_num_seq.append(num)
             input_data[0, time_step] = self.data_loader.embedding_matrix[num]
         for _ in range(text_length):
-            predict_label = self.model.predict(input_data)
+            predict_probs = self.model.predict(input_data)
+            predict_probs = temperature_adjusted(predict_probs)
             # Sample a token
             if sample_type == 'max':
-                token_choice = predict_label.argmax()
+                token_choice = predict_probs.argmax()
             elif sample_type == 'top3':
-                token_choice = np.random.choice(predict_label.argsort()[0, -3:])
+                token_choice = np.random.choice(predict_probs.argsort()[0, -3:])
             elif sample_type == 'random_choice':
-                token_choice = np.random.choice(range(len(predict_label[0])), p=predict_label[0])
+                token_choice = np.random.choice(range(len(predict_probs[0])), p=predict_probs[0])
             elif sample_type == 'threshold':
-                idx = np.argwhere(predict_label >= 0.3)
+                idx = np.argwhere(predict_probs >= 0.3)
                 if idx.shape[0] > 0:
                     token_choice = np.random.choice(idx[-1])
                 else:
-                    token_choice = np.random.choice(range(len(predict_label[0])), p=predict_label[0])
+                    token_choice = np.random.choice(range(len(predict_probs[0])), p=predict_probs[0])
             new_data = np.array([[self.data_loader.embedding_matrix[token_choice]]])
             input_data = np.concatenate((input_data[:, 1:], new_data), axis=1)
             token_num_seq.append(token_choice)
@@ -273,10 +286,11 @@ if __name__ == "__main__":
                              int_seq_path='D:\deep_learning\datasets/骆驼祥子_intseq.txt',
                              language='Chinese',
                              batch_size=128,
+                             sequence_length=100,
                              token_step=1,
                              character_based=True)
     mp = 'D:\deep_learning\models/camel.hdf5'
-    rm = SimpleRNNModel(model_path=mp, data_loader=dl)
+    rm = SimpleRNNModel(model_path=mp, dropout=0, data_loader=dl)
     if sys.argv[1] == 'train':
         dl.load_data_and_build_generator()
         if os.path.exists(mp):
