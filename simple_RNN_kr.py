@@ -230,9 +230,9 @@ class SimpleRNNModel(object):
                                  epochs=self.epochs, callbacks=[checkpointer, earlystopping])
 
     def generate_text(self, pre_text, text_length=1000, temperature=1.0, sample_type='random_choice'):
-        def temperature_adjusted(preds, temperature=temperature):
+        def temperature_adjusted(preds, temper=temperature):
             preds = np.asarray(preds).astype('float64')
-            preds = np.log(preds) / temperature
+            preds = np.log(preds) / temper
             exp_preds = np.exp(preds)
             preds = exp_preds / np.sum(exp_preds)
             # probas = np.random.multinomial(1, preds, 1)

@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 # Import MNIST data
 from tensorflow.examples.tutorials.mnist import input_data
 
-
 # mnist = input_data.read_data_sets("D:\deep_learning\datasets\mnist_data")
+from tensorflow.python.framework.errors_impl import NotFoundError
 
 
 class GANDataSet(object):
@@ -33,9 +33,10 @@ class GANDataSet(object):
 
     def parse_function(self, filename):
         image_string = tf.read_file(filename)
-        image_decoded = tf.image.decode_jpeg(image_string)
+        image_decoded = tf.image.decode_jpeg(image_string, channels=3)
         image_resized = tf.image.resize_images(image_decoded, [self.height, self.width])
-        return image_resized
+        image_normal = (tf.cast(image_resized, tf.float32) - 127.5) / 127.5
+        return image_normal
 
     def build_dataset(self):
         fname_list = [self.data_path + '/' + fname for fname in os.listdir(self.data_path)]
@@ -162,8 +163,16 @@ class DCGANModel(object):
         self.train_gen_op = optimizer_gen.minimize(self.gen_loss, var_list=gen_vars)
         self.train_disc_op = optimizer_disc.minimize(self.disc_loss, var_list=disc_vars)
 
-    def train_model(self, num_epochs=50, sample_interval=50, save_interval=10):
         self.saver = tf.train.Saver()
+
+    def restore_model(self):
+        try:
+            self.saver.restore(self.session, self.model_path)
+            print("Model restored from path: %s" % self.model_path)
+        except NotFoundError:
+            print("Model path not found %s" % self.model_path)
+
+    def train_model(self, num_epochs=50, k=2):
         steps_one_epoch = int(math.ceil(self.dataset.num_samples / self.dataset.batch_size))
         num_steps = num_epochs * steps_one_epoch
         self.session.run(tf.global_variables_initializer())
@@ -171,60 +180,52 @@ class DCGANModel(object):
         for step in range(1, num_steps + 1):
             batch_x = self.session.run(next_element)
             batch_size = batch_x.shape[0]
-            # Generate noise to feed to the generator
-            z = np.random.uniform(-1., 1., size=[batch_size, self.noise_dim])
-            # Prepare Targets (Real image: 1, Fake image: 0)
-            # The first half of data fed to the generator are real images,
-            # the other half are fake images (coming from the generator).
-            batch_disc_y = np.concatenate(
-                [np.ones([batch_size]), np.zeros([batch_size])], axis=0)
-            # Generator tries to fool the discriminator, thus targets are 1.
-            batch_gen_y = np.ones([batch_size])
-            # Training
-            feed_dict = {self.real_image_input: batch_x, self.noise_input: z,
-                         self.disc_target: batch_disc_y, self.gen_target: batch_gen_y}
-            _, _, gen_loss, disc_loss = self.session.run(
-                [self.train_gen_op, self.train_disc_op, self.gen_loss, self.disc_loss], feed_dict=feed_dict)
+            # training discriminator
+            z = np.random.normal(0, 1., size=[batch_size, self.noise_dim])
+            batch_disc_y = np.concatenate([np.ones([batch_size]), np.zeros([batch_size])], axis=0)
+            feed_dict = {self.real_image_input: batch_x, self.noise_input: z, self.disc_target: batch_disc_y}
+            _, disc_loss = self.session.run([self.train_disc_op, self.disc_loss], feed_dict=feed_dict)
+            # training generator
+            for _ in range(k):
+                z = np.random.normal(0, 1., size=[batch_size * 2, self.noise_dim])
+                batch_gen_y = np.ones([batch_size * 2])
+                feed_dict = {self.noise_input: z, self.gen_target: batch_gen_y}
+                _, gen_loss = self.session.run([self.train_gen_op, self.gen_loss], feed_dict=feed_dict)
+
             epoch = int(math.ceil(step / steps_one_epoch))
             print(
                 'Epoch: %i, Step: %i, Generator Loss: %f, Discriminator Loss: %f' % (epoch, step, gen_loss, disc_loss))
-            if step % sample_interval == 0:
-                self.sample_images(step)
-            if step % save_interval == 0:
+            if step % steps_one_epoch == 0:
+                self.sample_images(epoch)
                 save_path = self.saver.save(self.session, self.model_path)
                 print('Model saved in path: %s' % save_path)
 
-    def sample_images(self, step, images_path=None):
+    def sample_images(self, epoch, images_path=None):
         rows = 5
         cols = 5
-        fig, axes = plt.subplots(rows, cols)
+        fig, axes = plt.subplots(rows, cols, figsize=(8, 8))
         z = np.random.uniform(-1., 1., size=[rows * cols, self.noise_dim])
         samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
         count = 0
         for row in range(rows):
             for col in range(cols):
-                axes[row, col].imshow(samples[count, :, :, 0])
+                axes[row, col].imshow(samples[count, :, :, 0], interpolation='none')
                 axes[row, col].axis('off')
                 count += 1
-        images_path = images_path if images_path else self.sample_images_path + "\sample_%d.png" % step
+        images_path = images_path if images_path else self.sample_images_path + "\sample_%d.png" % epoch
         fig.savefig(images_path)
         plt.close()
 
     def test(self):
-        self.noise_input = tf.placeholder(tf.float32, shape=[None, self.noise_dim])
-        self.real_image_input = tf.placeholder(tf.float32, shape=[None, self.dataset.height, self.dataset.width,
-                                                                  self.dataset.channels])
-        self.gen_samples = self.generator(self.noise_input)
         self.session.run(tf.global_variables_initializer())
-        z = np.random.uniform(-1., 1., size=[self.dataset.batch_size, self.noise_dim])
-        feed_dict = {self.noise_input: z}
-        gs = self.session.run(self.gen_samples, feed_dict=feed_dict)
-        print(gs.shape)
+        self.sample_images(1)
 
 
 if __name__ == "__main__":
-    gds = GANDataSet(data_path='D://deep_learning/datasets/17flowers', height=64, width=64)
-    dgm = DCGANModel(model_path='D:/deep_learning/models/dcgan_test.ckpt',
+    gds = GANDataSet(data_path='D://deep_learning/datasets/actress_images', height=64, width=64)
+    dgm = DCGANModel(model_path='D:/deep_learning/models/actress/actress.ckpt',
                      sample_images_path='D://deep_learning/samples', dataset=gds)
     dgm.build_model()
-    dgm.train_model()
+    dgm.restore_model()
+    dgm.train_model(num_epochs=10000)
+    # dgm.test()
