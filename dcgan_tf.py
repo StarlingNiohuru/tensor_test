@@ -1,18 +1,15 @@
 import math
 import os
+import sys
 
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-# Import MNIST data
-from tensorflow.examples.tutorials.mnist import input_data
-
-# mnist = input_data.read_data_sets("D:\deep_learning\datasets\mnist_data")
 from tensorflow.python.framework.errors_impl import NotFoundError
 
 
 class GANDataSet(object):
-    def __init__(self, data_path, height, width, channels=3, batch_size=128):
+    def __init__(self, data_path=None, height=None, width=None, channels=3, batch_size=128):
         self.data_path = data_path
         self.height = height
         self.width = width
@@ -23,7 +20,13 @@ class GANDataSet(object):
         self.dataset = None
         self.iterator = None
 
-        self.build_dataset()
+        if self.data_path:
+            self.build_dataset()
+        else:
+            self.build_mnist_dataset()
+            self.height = 28
+            self.width = 28
+            self.channels = 1
 
     @staticmethod
     def read_function(filename):
@@ -35,7 +38,9 @@ class GANDataSet(object):
         image_string = tf.read_file(filename)
         image_decoded = tf.image.decode_jpeg(image_string, channels=self.channels)
         image_resized = tf.image.resize_images(image_decoded, [self.height, self.width])
-        image_normal = (tf.cast(image_resized, tf.float32) - 127.5) / 127.5
+        image_noisy = image_resized + np.random.normal(0, 1.0, image_resized.shape)
+        image_noisy = tf.clip_by_value(image_noisy, 0, 255)
+        image_normal = (tf.cast(image_noisy, tf.float32) - 127.5) / 127.5
         return image_normal
 
     def build_dataset(self):
@@ -48,14 +53,26 @@ class GANDataSet(object):
         self.dataset = dataset.shuffle(buffer_size=self.num_samples).batch(self.batch_size).repeat()
         self.iterator = self.dataset.make_one_shot_iterator()
 
+    def build_mnist_dataset(self):
+        train, _ = tf.keras.datasets.mnist.load_data()
+        mnist_x, _ = train
+        mnist_ds = tf.data.Dataset.from_tensor_slices(mnist_x)
+        self.dataset = mnist_ds.shuffle(buffer_size=self.num_samples).batch(self.batch_size).repeat()
+        self.iterator = self.dataset.make_one_shot_iterator()
+
 
 class DCGANModel(object):
-    def __init__(self, session=tf.Session(), noise_dim=100, disc_first_dim=64, gen_first_dim=64, model_path=None,
+    def __init__(self, session=tf.Session(), noise_dim=100, disc_first_dim=64, gen_first_dim=64, beta1=0.5,
+                 gen_learning_rate=0.0002, disc_learning_rate=0.00005, momentum=0.5, model_path=None,
                  sample_images_path=None, dataset: GANDataSet = None):
         self.session = session
         self.noise_dim = noise_dim
         self.disc_first_dim = disc_first_dim
         self.gen_first_dim = gen_first_dim
+        self.beta1 = beta1
+        self.gen_learning_rate = gen_learning_rate
+        self.disc_learning_rate = disc_learning_rate
+        self.momentum = momentum
         self.model_path = model_path
         self.sample_images_path = sample_images_path
         self.dataset = dataset
@@ -75,23 +92,23 @@ class DCGANModel(object):
         with tf.variable_scope('Generator', reuse=reuse):
             x = tf.layers.dense(x, self.dataset.height * self.dataset.width * self.gen_first_dim // 16,
                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
-            x = tf.nn.relu(x)
             x = tf.reshape(x, [-1, self.dataset.height // 16, self.dataset.width // 16, self.gen_first_dim * 16])
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
+            x = tf.nn.relu(x)
 
             x = tf.layers.conv2d_transpose(x, filters=self.gen_first_dim * 8, kernel_size=4, strides=2, padding='same',
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
             x = tf.layers.conv2d_transpose(x, filters=self.gen_first_dim * 4, kernel_size=4, strides=2, padding='same',
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
             x = tf.layers.conv2d_transpose(x, filters=self.gen_first_dim * 2, kernel_size=4, strides=2, padding='same',
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
             x = tf.layers.conv2d_transpose(x, filters=self.dataset.channels, kernel_size=4, strides=2, padding='same',
@@ -108,23 +125,23 @@ class DCGANModel(object):
 
             x = tf.layers.conv2d(x, filters=self.disc_first_dim * 2, kernel_size=4, strides=2, padding='same',
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.leaky_relu(x)
             x = tf.layers.dropout(x, rate=0.25)
 
             x = tf.layers.conv2d(x, filters=self.disc_first_dim * 4, kernel_size=4, strides=2, padding='same',
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.leaky_relu(x)
             x = tf.layers.dropout(x, rate=0.25)
 
             x = tf.layers.conv2d(x, filters=self.disc_first_dim * 8, kernel_size=4, strides=2, padding='same',
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.5)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.leaky_relu(x)
             x = tf.layers.dropout(x, rate=0.25)
 
-            x = tf.layers.flatten(x)
+            x = tf.reshape(x, [-1, self.disc_first_dim * self.dataset.height * self.dataset.width // 32])
             x = tf.layers.dense(x, 2, activation=tf.nn.softmax,
                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             return x
@@ -156,8 +173,8 @@ class DCGANModel(object):
             logits=stacked_gan, labels=self.gen_target))
 
         # Build Optimizers
-        optimizer_gen = tf.train.AdamOptimizer(learning_rate=0.0002)
-        optimizer_disc = tf.train.AdamOptimizer(learning_rate=0.00005)
+        optimizer_gen = tf.train.AdamOptimizer(learning_rate=self.gen_learning_rate, beta1=self.beta1)
+        optimizer_disc = tf.train.AdamOptimizer(learning_rate=self.disc_learning_rate, beta1=self.beta1)
 
         # Training Variables for each optimizer
         gen_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='Generator')
@@ -176,7 +193,7 @@ class DCGANModel(object):
         except NotFoundError:
             print("Model path not found %s" % self.model_path)
 
-    def train_model(self, num_epochs=50, k=1):
+    def train_model(self, num_epochs=100, d_times=1, g_times=1):
         steps_one_epoch = int(math.ceil(self.dataset.num_samples / self.dataset.batch_size))
         num_steps = num_epochs * steps_one_epoch
         self.session.run(tf.global_variables_initializer())
@@ -185,14 +202,16 @@ class DCGANModel(object):
             batch_x = self.session.run(next_element)
             batch_size = batch_x.shape[0]
             # training discriminator
-            for _ in range(k):
-                z = np.random.normal(0, 1., size=[batch_size, self.noise_dim])
+            for _ in range(d_times):
+                # z = np.random.normal(0, 1., size=[batch_size, self.noise_dim])
+                z = np.random.uniform(-1, 1, [batch_size, self.noise_dim])
                 batch_disc_y = np.concatenate([np.ones([batch_size]), np.zeros([batch_size])], axis=0)
                 feed_dict = {self.real_image_input: batch_x, self.noise_input: z, self.disc_target: batch_disc_y}
                 _, disc_loss = self.session.run([self.train_disc_op, self.disc_loss], feed_dict=feed_dict)
             # training generator
-            for _ in range(1):
-                z = np.random.normal(0, 1., size=[batch_size * 2, self.noise_dim])
+            for _ in range(g_times):
+                # z = np.random.normal(0, 1., size=[batch_size * 2, self.noise_dim])
+                z = np.random.uniform(-1, 1, [batch_size * 2, self.noise_dim])
                 batch_gen_y = np.ones([batch_size * 2])
                 feed_dict = {self.noise_input: z, self.gen_target: batch_gen_y}
                 _, gen_loss = self.session.run([self.train_gen_op, self.gen_loss], feed_dict=feed_dict)
@@ -215,7 +234,7 @@ class DCGANModel(object):
         for row in range(rows):
             for col in range(cols):
                 # print(0.5*samples[count] + 0.5)
-                axes[row, col].imshow(0.5 * samples[count] + 0.5, interpolation='nearest', vmin=0, vmax=1)
+                axes[row, col].imshow(np.clip(0.5 * samples[count] + 0.5, 0, 1), interpolation='nearest')
                 axes[row, col].axis('off')
                 count += 1
         images_path = images_path if images_path else self.sample_images_path + "\sample_%d.png" % epoch
@@ -225,12 +244,10 @@ class DCGANModel(object):
     def test(self):
         self.session.run(tf.global_variables_initializer())
         # self.sample_images(1)
-        # next_element = self.dataset.iterator.get_next()
-        # batch_x = self.session.run(next_element)
-        # print(batch_x.shape)
-        # print(batch_x[0,0,:,0]*127.5+127.5)
-        z = np.random.normal(0, 1., size=[25, self.noise_dim])
-        samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
+        next_element = self.dataset.iterator.get_next()
+        batch_x = self.session.run(next_element)
+        # z = np.random.normal(0, 1., size=[25, self.noise_dim])
+        # samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
         # print(samples.shape)
         # print(samples[0,30,:,0]*127.5+127.5)
         rows = 5
@@ -239,7 +256,8 @@ class DCGANModel(object):
         count = 0
         for row in range(rows):
             for col in range(cols):
-                ia = samples[count]
+                ia = batch_x[count]
+                print(ia)
                 axes[row, col].imshow(0.5 * ia + 0.5, interpolation='nearest')
                 axes[row, col].axis('off')
                 count += 1
@@ -247,12 +265,28 @@ class DCGANModel(object):
         fig.savefig(images_path)
         plt.close()
 
+    def test2(self):
+        self.session.run(tf.global_variables_initializer())
+        next_element = self.dataset.iterator.get_next()
+        batch_x = self.session.run(next_element)
+        print(batch_x.shape)
+        print(batch_x[0])
+
 
 if __name__ == "__main__":
-    gds = GANDataSet(data_path='D://deep_learning/datasets/actress_images', height=64, width=64)
-    dgm = DCGANModel(model_path='D:/deep_learning/models/actress/actress.ckpt',
-                     sample_images_path='D://deep_learning/samples', dataset=gds)
-    dgm.build_model()
-    dgm.restore_model()
-    dgm.train_model(num_epochs=1000)
-    dgm.test()
+    gds = GANDataSet(data_path='D://deep_learning/datasets/celeb_test', height=64, width=64)
+    dgm = DCGANModel(model_path='D://deep_learning/models/celeb/celeb.ckpt',
+                     sample_images_path='D://deep_learning/samples',
+                     gen_learning_rate=0.0002,
+                     disc_learning_rate=0.00005,
+                     dataset=gds)
+    if sys.argv[1] == 'train':
+        dgm.build_model()
+        dgm.restore_model()
+        dgm.train_model(num_epochs=1000, g_times=2)
+    elif sys.argv[1] == 'test':
+        gds = GANDataSet()
+        dgm = DCGANModel(model_path='D://deep_learning/models/mnist/mnist.ckpt',
+                         sample_images_path='D://deep_learning/samples',
+                         dataset=gds)
+        dgm.test2()
