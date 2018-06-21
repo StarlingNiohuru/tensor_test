@@ -62,17 +62,18 @@ class GANDataSet(object):
 
 
 class DCGANModel(object):
-    def __init__(self, session=tf.Session(), noise_dim=100, disc_first_dim=64, gen_first_dim=64, beta1=0.5,
-                 gen_learning_rate=0.0002, disc_learning_rate=0.00005, momentum=0.5, model_path=None,
+    def __init__(self, session=tf.Session(), noise_dim=100, disc_latent_dim=128, gen_latent_dim=128, beta1=0.5,
+                 gen_learning_rate=0.0002, disc_learning_rate=0.0002, momentum=0.8, dropout=0, model_path=None,
                  sample_images_path=None, dataset: GANDataSet = None):
         self.session = session
         self.noise_dim = noise_dim
-        self.disc_first_dim = disc_first_dim
-        self.gen_first_dim = gen_first_dim
+        self.disc_latent_dim = disc_latent_dim
+        self.gen_latent_dim = gen_latent_dim
         self.beta1 = beta1
         self.gen_learning_rate = gen_learning_rate
         self.disc_learning_rate = disc_learning_rate
         self.momentum = momentum
+        self.dropout = dropout
         self.model_path = model_path
         self.sample_images_path = sample_images_path
         self.dataset = dataset
@@ -90,23 +91,23 @@ class DCGANModel(object):
 
     def generator(self, x, reuse=False):
         with tf.variable_scope('Generator', reuse=reuse):
-            x = tf.layers.dense(x, self.dataset.height * self.dataset.width * self.gen_first_dim // 16,
+            x = tf.layers.dense(x, self.dataset.height * self.dataset.width * self.gen_latent_dim // 32,
                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.reshape(x, [-1, self.dataset.height // 16, self.dataset.width // 16, self.gen_first_dim * 16])
+            x = tf.reshape(x, [-1, self.dataset.height // 16, self.dataset.width // 16, self.gen_latent_dim * 8])
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
-            x = tf.layers.conv2d_transpose(x, filters=self.gen_first_dim * 8, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d_transpose(x, filters=self.gen_latent_dim * 4, kernel_size=5, strides=1,
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
-            x = tf.layers.conv2d_transpose(x, filters=self.gen_first_dim * 4, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d_transpose(x, filters=self.gen_latent_dim * 2, kernel_size=4, strides=2, padding='same',
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
-            x = tf.layers.conv2d_transpose(x, filters=self.gen_first_dim * 2, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d_transpose(x, filters=self.gen_latent_dim, kernel_size=4, strides=2, padding='same',
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
@@ -118,30 +119,30 @@ class DCGANModel(object):
 
     def discriminator(self, x, reuse=False):
         with tf.variable_scope('Discriminator', reuse=reuse):
-            x = tf.layers.conv2d(x, filters=self.disc_first_dim, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d(x, filters=self.disc_latent_dim, kernel_size=4, strides=2, padding='same',
                                  activation=tf.nn.leaky_relu,
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.dropout(x, rate=0.25)
+            x = tf.layers.dropout(x, rate=self.dropout)
 
-            x = tf.layers.conv2d(x, filters=self.disc_first_dim * 2, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d(x, filters=self.disc_latent_dim * 2, kernel_size=4, strides=2, padding='same',
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.leaky_relu(x)
-            x = tf.layers.dropout(x, rate=0.25)
+            x = tf.layers.dropout(x, rate=self.dropout)
 
-            x = tf.layers.conv2d(x, filters=self.disc_first_dim * 4, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d(x, filters=self.disc_latent_dim * 4, kernel_size=4, strides=2, padding='same',
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.leaky_relu(x)
-            x = tf.layers.dropout(x, rate=0.25)
+            x = tf.layers.dropout(x, rate=self.dropout)
 
-            x = tf.layers.conv2d(x, filters=self.disc_first_dim * 8, kernel_size=4, strides=2, padding='same',
+            x = tf.layers.conv2d(x, filters=self.disc_latent_dim * 8, kernel_size=5, strides=1,
                                  kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.leaky_relu(x)
-            x = tf.layers.dropout(x, rate=0.25)
+            x = tf.layers.dropout(x, rate=self.dropout)
 
-            x = tf.reshape(x, [-1, self.disc_first_dim * self.dataset.height * self.dataset.width // 32])
+            x = tf.reshape(x, [-1, self.disc_latent_dim * self.dataset.height * self.dataset.width // 32])
             x = tf.layers.dense(x, 2, activation=tf.nn.softmax,
                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             return x
@@ -193,7 +194,7 @@ class DCGANModel(object):
         except NotFoundError:
             print("Model path not found %s" % self.model_path)
 
-    def train_model(self, num_epochs=100, d_times=1, g_times=1):
+    def train_model(self, num_epochs=1000, d_times=1, g_times=1):
         steps_one_epoch = int(math.ceil(self.dataset.num_samples / self.dataset.batch_size))
         num_steps = num_epochs * steps_one_epoch
         self.session.run(tf.global_variables_initializer())
@@ -203,14 +204,12 @@ class DCGANModel(object):
             batch_size = batch_x.shape[0]
             # training discriminator
             for _ in range(d_times):
-                # z = np.random.normal(0, 1., size=[batch_size, self.noise_dim])
                 z = np.random.uniform(-1, 1, [batch_size, self.noise_dim])
                 batch_disc_y = np.concatenate([np.ones([batch_size]), np.zeros([batch_size])], axis=0)
                 feed_dict = {self.real_image_input: batch_x, self.noise_input: z, self.disc_target: batch_disc_y}
                 _, disc_loss = self.session.run([self.train_disc_op, self.disc_loss], feed_dict=feed_dict)
             # training generator
             for _ in range(g_times):
-                # z = np.random.normal(0, 1., size=[batch_size * 2, self.noise_dim])
                 z = np.random.uniform(-1, 1, [batch_size * 2, self.noise_dim])
                 batch_gen_y = np.ones([batch_size * 2])
                 feed_dict = {self.noise_input: z, self.gen_target: batch_gen_y}
@@ -228,7 +227,7 @@ class DCGANModel(object):
         rows = 5
         cols = 5
         fig, axes = plt.subplots(rows, cols, figsize=(8, 8), dpi=100)
-        z = np.random.normal(0, 1., size=[rows * cols, self.noise_dim])
+        z = np.random.uniform(-1, 1, size=[rows * cols, self.noise_dim])
         samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
         count = 0
         for row in range(rows):
@@ -274,16 +273,16 @@ class DCGANModel(object):
 
 
 if __name__ == "__main__":
-    gds = GANDataSet(data_path='D://deep_learning/datasets/celeb_test', height=64, width=64)
-    dgm = DCGANModel(model_path='D://deep_learning/models/celeb/celeb.ckpt',
+    gds = GANDataSet(data_path='D://deep_learning/datasets/sheephead', height=64, width=64)
+    dgm = DCGANModel(model_path='D://deep_learning/models/sheephead/sheephead.ckpt',
                      sample_images_path='D://deep_learning/samples',
                      gen_learning_rate=0.0002,
-                     disc_learning_rate=0.00005,
+                     disc_learning_rate=0.0002,
                      dataset=gds)
     if sys.argv[1] == 'train':
         dgm.build_model()
         dgm.restore_model()
-        dgm.train_model(num_epochs=1000, g_times=2)
+        dgm.train_model(num_epochs=1000)
     elif sys.argv[1] == 'test':
         gds = GANDataSet()
         dgm = DCGANModel(model_path='D://deep_learning/models/mnist/mnist.ckpt',
