@@ -121,8 +121,8 @@ class WGANModel(object):
         self.train_gen_op = optimizer_gen.minimize(self.gen_loss, var_list=gen_vars)
         self.train_cri_op = optimizer_cri.minimize(self.cri_loss, var_list=cri_vars)
 
-        weight_cri = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='Critic')
-        self.clip_op = tf.assign(weight_cri, tf.clip_by_value(weight_cri, self.clamp_lower, self.clamp_upper))
+        clip_ops_list = [tf.assign(var, tf.clip_by_value(var, self.clamp_lower, self.clamp_upper)) for var in cri_vars]
+        self.clip_op = tf.group(*clip_ops_list)
 
         self.saver = tf.train.Saver()
 
@@ -145,7 +145,9 @@ class WGANModel(object):
             for _ in range(self.num_critic):
                 z = np.random.uniform(-1, 1, [batch_size, self.noise_dim])
                 feed_dict = {self.real_image_input: batch_x, self.noise_input: z}
-                _, _, cri_loss = self.session.run([self.train_cri_op, self.clip_op, self.cri_loss], feed_dict=feed_dict)
+                # _, _, cri_loss = self.session.run([self.train_cri_op, self.clip_op, self.cri_loss], feed_dict=feed_dict)
+                _, cri_loss = self.session.run([self.train_cri_op, self.cri_loss], feed_dict=feed_dict)
+                self.session.run(self.clip_op)
 
             # training generator
             z = np.random.uniform(-1, 1, [batch_size * 2, self.noise_dim])
@@ -179,8 +181,8 @@ class WGANModel(object):
 
 
 if __name__ == "__main__":
-    gds = GANDataSet(data_path='D://deep_learning/datasets/sheephead', height=64, width=64)
-    wgm = WGANModel(model_path='D://deep_learning/models/sheephead/sheephead.ckpt',
+    gds = GANDataSet(data_path='D://deep_learning/datasets/actress_images_small', height=64, width=64)
+    wgm = WGANModel(model_path='D://deep_learning/models/actress/actress.ckpt',
                     sample_images_path='D://deep_learning/samples',
                     dataset=gds)
     if sys.argv[1] == 'train':
