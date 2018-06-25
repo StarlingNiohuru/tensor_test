@@ -6,6 +6,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.python.framework.errors_impl import NotFoundError
+from tensorflow.examples.tutorials.mnist import input_data
 
 
 class GANDataSet(object):
@@ -23,9 +24,10 @@ class GANDataSet(object):
         if self.data_path:
             self.build_dataset()
         else:
+            self.data_path = 'D://deep_learning/datasets/mnist_data'
             self.build_mnist_dataset()
-            self.height = 28
-            self.width = 28
+            self.height = 32
+            self.width = 32
             self.channels = 1
 
     @staticmethod
@@ -54,21 +56,26 @@ class GANDataSet(object):
         self.iterator = self.dataset.make_one_shot_iterator()
 
     def build_mnist_dataset(self):
-        train, _ = tf.keras.datasets.mnist.load_data()
-        mnist_x, _ = train
-        mnist_ds = tf.data.Dataset.from_tensor_slices(mnist_x)
+        mnist = input_data.read_data_sets(self.data_path, one_hot=False)
+        self.num_samples = mnist.train.num_examples
+        print('Total number of samples: %s' % self.num_samples)
+        x, _ = mnist.train.next_batch(self.num_samples)
+        x = x.reshape([-1, 28, 28, 1])
+        x = np.pad(x, [(0, 0), (2, 2), (2, 2), (0, 0)], 'constant', constant_values=(0, 0))
+        mnist_ds = tf.data.Dataset.from_tensor_slices(x)
         self.dataset = mnist_ds.shuffle(buffer_size=self.num_samples).batch(self.batch_size).repeat()
         self.iterator = self.dataset.make_one_shot_iterator()
 
 
 class DCGANModel(object):
-    def __init__(self, session=tf.Session(), noise_dim=100, disc_latent_dim=128, gen_latent_dim=128, beta1=0.5,
-                 gen_learning_rate=0.0002, disc_learning_rate=0.0002, momentum=0.8, dropout=0, model_path=None,
-                 sample_images_path=None, dataset: GANDataSet = None):
+    def __init__(self, session=tf.Session(), noise_dim=100, disc_latent_dim=128, gen_latent_dim=128, kernel_size=5,
+                 beta1=0.5, gen_learning_rate=0.0002, disc_learning_rate=0.0002, momentum=0.8, dropout=0,
+                 model_path=None, sample_images_path=None, dataset: GANDataSet = None):
         self.session = session
         self.noise_dim = noise_dim
         self.disc_latent_dim = disc_latent_dim
         self.gen_latent_dim = gen_latent_dim
+        self.kernel_size = kernel_size
         self.beta1 = beta1
         self.gen_learning_rate = gen_learning_rate
         self.disc_learning_rate = disc_learning_rate
@@ -91,60 +98,64 @@ class DCGANModel(object):
 
     def generator(self, x, reuse=False):
         with tf.variable_scope('Generator', reuse=reuse):
-            x = tf.layers.dense(x, self.dataset.height * self.dataset.width * self.gen_latent_dim // 32,
+            strides_num = 2
+            padding_type = 'same'
+            num_layers = math.ceil(math.log2(int(min(self.dataset.height, self.dataset.width)) / self.kernel_size))
+            num_layers = min(int(num_layers), 4)
+            filters_num = 2 ** (num_layers - 1) * self.gen_latent_dim
+
+            print("Gen dense layer input shape: {}".format(x.shape))
+            x = tf.layers.dense(x,
+                                self.dataset.height * self.dataset.width * filters_num // (2 ** (2 * num_layers)),
                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.reshape(x, [-1, self.dataset.height // 16, self.dataset.width // 16, self.gen_latent_dim * 8])
+            print("Gen reshape layer input shape: {}".format(x.shape))
+            x = tf.reshape(x, [-1, self.dataset.height // 2 ** num_layers, self.dataset.width // 2 ** num_layers,
+                               filters_num])
             x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
             x = tf.nn.relu(x)
 
-            x = tf.layers.conv2d_transpose(x, filters=self.gen_latent_dim * 4, kernel_size=5, strides=1,
-                                           kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.conv2d_transpose(x, filters=self.gen_latent_dim * 2, kernel_size=5, strides=2, padding='same',
-                                           kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.conv2d_transpose(x, filters=self.gen_latent_dim, kernel_size=5, strides=2, padding='same',
-                                           kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.conv2d_transpose(x, filters=self.dataset.channels, kernel_size=5, strides=2, padding='same',
-                                           activation=tf.nn.tanh,
-                                           kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+            for i in range(1, num_layers + 1):
+                print("Gen conv_trans layer-{} input shape: {}".format(i, x.shape))
+                filters_num /= 2
+                if i == num_layers:
+                    filters_num = self.dataset.channels
+                x = tf.layers.conv2d_transpose(x, filters=int(filters_num), kernel_size=self.kernel_size,
+                                               strides=strides_num, padding=padding_type,
+                                               kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
+                if i < num_layers:
+                    x = tf.nn.relu(x)
+                else:
+                    x = tf.nn.tanh(x)
+            print("Gen output shape: {}".format(x.shape))
             return x
 
     def discriminator(self, x, reuse=False):
         with tf.variable_scope('Discriminator', reuse=reuse):
-            x = tf.layers.conv2d(x, filters=self.disc_latent_dim, kernel_size=5, strides=2, padding='same',
-                                 activation=tf.nn.leaky_relu,
-                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.dropout(x, rate=self.dropout)
+            filters_num = self.disc_latent_dim
+            strides_num = 2
+            padding_type = 'same'
+            num_layers = math.ceil(math.log2(int(min(x.shape[1], x.shape[2])) / self.kernel_size))
+            num_layers = min(int(num_layers), 4)
+            for i in range(1, num_layers + 1):
+                # if i == num_layers:
+                #     strides_num = 1
+                #     padding_type = 'valid'
+                print("Disc conv layer-{} input shape: {}".format(i, x.shape))
+                x = tf.layers.conv2d(x, filters=filters_num, kernel_size=self.kernel_size, strides=strides_num,
+                                     padding=padding_type, kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                if i > 1:
+                    x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
+                x = tf.nn.leaky_relu(x)
+                x = tf.layers.dropout(x, rate=self.dropout)
+                filters_num *= 2
 
-            x = tf.layers.conv2d(x, filters=self.disc_latent_dim * 2, kernel_size=5, strides=2, padding='same',
-                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
-            x = tf.nn.leaky_relu(x)
-            x = tf.layers.dropout(x, rate=self.dropout)
-
-            x = tf.layers.conv2d(x, filters=self.disc_latent_dim * 4, kernel_size=5, strides=2, padding='same',
-                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
-            x = tf.nn.leaky_relu(x)
-            x = tf.layers.dropout(x, rate=self.dropout)
-
-            x = tf.layers.conv2d(x, filters=self.disc_latent_dim * 8, kernel_size=5, strides=1,
-                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
-            x = tf.nn.leaky_relu(x)
-            x = tf.layers.dropout(x, rate=self.dropout)
-
-            x = tf.reshape(x, [-1, self.disc_latent_dim * self.dataset.height * self.dataset.width // 32])
+            print("Disc reshape layer input shape: {}".format(x.shape))
+            x = tf.reshape(x, [-1, x.shape[1] * x.shape[2] * x.shape[3]])
+            print("Disc dense layer input shape: {}".format(x.shape))
             x = tf.layers.dense(x, 2, activation=tf.nn.softmax,
                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+            print("Disc output shape: {}".format(x.shape))
             return x
 
     def build_model(self):
@@ -273,19 +284,27 @@ class DCGANModel(object):
 
 
 if __name__ == "__main__":
-    gds = GANDataSet(data_path='D://deep_learning/datasets/actress', height=64, width=64)
-    dgm = DCGANModel(model_path='D://deep_learning/models/actress/actress.ckpt',
-                     sample_images_path='D://deep_learning/samples',
-                     gen_learning_rate=0.0002,
-                     disc_learning_rate=0.00005,
-                     dataset=gds)
+    # gds = GANDataSet(data_path='D://deep_learning/datasets/actress', height=64, width=64)
+    # dgm = DCGANModel(model_path='D://deep_learning/models/actress/actress.ckpt',
+    #                  sample_images_path='D://deep_learning/samples',
+    #                  gen_learning_rate=0.0002,
+    #                  disc_learning_rate=0.00005,
+    #                  dataset=gds)
     if sys.argv[1] == 'train':
+        gds = GANDataSet(data_path='D://deep_learning/datasets/sheephead', height=64, width=64)
+        dgm = DCGANModel(model_path='D://deep_learning/models/sheephead/sheephead.ckpt',
+                         sample_images_path='D://deep_learning/samples',
+                         gen_learning_rate=0.0002,
+                         disc_learning_rate=0.00005,
+                         dataset=gds)
         dgm.build_model()
-        dgm.restore_model()
-        dgm.train_model(num_epochs=1000)
+        # dgm.restore_model()
+        # dgm.train_model(num_epochs=1000)
     elif sys.argv[1] == 'test':
         gds = GANDataSet()
         dgm = DCGANModel(model_path='D://deep_learning/models/mnist/mnist.ckpt',
                          sample_images_path='D://deep_learning/samples',
                          dataset=gds)
-        dgm.test2()
+        dgm.build_model()
+        dgm.restore_model()
+        dgm.train_model(num_epochs=1000)
