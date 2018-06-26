@@ -98,8 +98,8 @@ class DCGANModel(object):
 
     def generator(self, x, reuse=False):
         with tf.variable_scope('Generator', reuse=reuse):
-            strides_num = 2
-            padding_type = 'same'
+            strides_num = 1
+            padding_type = 'valid'
             num_layers = math.ceil(math.log2(int(min(self.dataset.height, self.dataset.width)) / self.kernel_size))
             num_layers = min(int(num_layers), 4)
             filters_num = 2 ** (num_layers - 1) * self.gen_latent_dim
@@ -117,6 +117,9 @@ class DCGANModel(object):
             for i in range(1, num_layers + 1):
                 print("Gen conv_trans layer-{} input shape: {}".format(i, x.shape))
                 filters_num /= 2
+                if i > 1:
+                    strides_num = 2
+                    padding_type = 'same'
                 if i == num_layers:
                     filters_num = self.dataset.channels
                 x = tf.layers.conv2d_transpose(x, filters=int(filters_num), kernel_size=self.kernel_size,
@@ -138,9 +141,9 @@ class DCGANModel(object):
             num_layers = math.ceil(math.log2(int(min(x.shape[1], x.shape[2])) / self.kernel_size))
             num_layers = min(int(num_layers), 4)
             for i in range(1, num_layers + 1):
-                # if i == num_layers:
-                #     strides_num = 1
-                #     padding_type = 'valid'
+                if i == num_layers:
+                    strides_num = 1
+                    padding_type = 'valid'
                 print("Disc conv layer-{} input shape: {}".format(i, x.shape))
                 x = tf.layers.conv2d(x, filters=filters_num, kernel_size=self.kernel_size, strides=strides_num,
                                      padding=padding_type, kernel_initializer=tf.random_normal_initializer(stddev=0.02))
@@ -244,7 +247,7 @@ class DCGANModel(object):
         for row in range(rows):
             for col in range(cols):
                 # print(0.5*samples[count] + 0.5)
-                axes[row, col].imshow(np.clip(0.5 * samples[count] + 0.5, 0, 1), interpolation='nearest')
+                axes[row, col].imshow(np.clip(0.5 * samples[count] + 0.5, 0, 1).squeeze(), interpolation='nearest')
                 axes[row, col].axis('off')
                 count += 1
         images_path = images_path if images_path else self.sample_images_path + "\sample_%d.png" % epoch
@@ -271,7 +274,7 @@ class DCGANModel(object):
                 axes[row, col].imshow(0.5 * ia + 0.5, interpolation='nearest')
                 axes[row, col].axis('off')
                 count += 1
-        images_path = self.sample_images_path + "\sample_test.png"
+        images_path = self.sample_images_path + "/sample_test.png"
         fig.savefig(images_path)
         plt.close()
 
@@ -306,5 +309,5 @@ if __name__ == "__main__":
                          sample_images_path='D://deep_learning/samples',
                          dataset=gds)
         dgm.build_model()
-        dgm.restore_model()
-        dgm.train_model(num_epochs=1000)
+        # dgm.restore_model()
+        # dgm.train_model(num_epochs=100)
