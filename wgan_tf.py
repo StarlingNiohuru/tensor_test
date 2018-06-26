@@ -30,6 +30,7 @@ class WGANModel(object):
         self.dataset = dataset
 
         self.saver = None
+        self.is_restore = True
         self.noise_input = None
         self.real_image_input = None
         self.gen_samples = None
@@ -138,13 +139,15 @@ class WGANModel(object):
         try:
             self.saver.restore(self.session, self.model_path)
             print("Model restored from path: %s" % self.model_path)
+            self.is_restore = True
         except NotFoundError:
             print("Model path not found %s" % self.model_path)
 
     def train_model(self, num_epochs=1000):
         steps_one_epoch = int(math.ceil(self.dataset.num_samples / self.dataset.batch_size))
         num_steps = num_epochs * steps_one_epoch
-        self.session.run(tf.global_variables_initializer())
+        if not self.is_restore:
+            self.session.run(tf.global_variables_initializer())
         next_element = self.dataset.iterator.get_next()
         for step in range(1, num_steps + 1):
             batch_x = self.session.run(next_element)

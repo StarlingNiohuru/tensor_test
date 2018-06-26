@@ -86,6 +86,7 @@ class DCGANModel(object):
         self.dataset = dataset
 
         self.saver = None
+        self.is_restore = False
         self.noise_input = None
         self.real_image_input = None
         self.gen_samples = None
@@ -205,13 +206,15 @@ class DCGANModel(object):
         try:
             self.saver.restore(self.session, self.model_path)
             print("Model restored from path: %s" % self.model_path)
+            self.is_restore = True
         except NotFoundError:
             print("Model path not found %s" % self.model_path)
 
     def train_model(self, num_epochs=1000, d_times=1, g_times=1):
         steps_one_epoch = int(math.ceil(self.dataset.num_samples / self.dataset.batch_size))
         num_steps = num_epochs * steps_one_epoch
-        self.session.run(tf.global_variables_initializer())
+        if not self.is_restore:
+            self.session.run(tf.global_variables_initializer())
         next_element = self.dataset.iterator.get_next()
         for step in range(1, num_steps + 1):
             batch_x = self.session.run(next_element)
@@ -299,10 +302,12 @@ if __name__ == "__main__":
                          sample_images_path='D://deep_learning/samples',
                          gen_learning_rate=0.0002,
                          disc_learning_rate=0.00005,
+                         gen_latent_dim=64,
+                         disc_latent_dim=64,
                          dataset=gds)
         dgm.build_model()
-        # dgm.restore_model()
-        # dgm.train_model(num_epochs=1000)
+        dgm.restore_model()
+        dgm.train_model(num_epochs=1000)
     elif sys.argv[1] == 'test':
         gds = GANDataSet()
         dgm = DCGANModel(model_path='D://deep_learning/models/mnist/mnist.ckpt',
