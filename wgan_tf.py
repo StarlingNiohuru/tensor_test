@@ -30,7 +30,7 @@ class WGANModel(object):
         self.dataset = dataset
 
         self.saver = None
-        self.is_restore = True
+        self.is_restore = False
         self.noise_input = None
         self.real_image_input = None
         self.gen_samples = None
@@ -53,7 +53,7 @@ class WGANModel(object):
             print("Gen dense layer input shape: {}".format(x.shape))
             x = tf.layers.dense(x,
                                 self.dataset.height * self.dataset.width * filters_num // (2 ** (2 * num_layers)),
-                                kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                                kernel_initializer=tf.random_normal_initializer())
             print("Gen reshape layer input shape: {}".format(x.shape))
             x = tf.reshape(x, [-1, self.dataset.height // 2 ** num_layers, self.dataset.width // 2 ** num_layers,
                                filters_num])

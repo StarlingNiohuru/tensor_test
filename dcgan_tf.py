@@ -108,7 +108,7 @@ class DCGANModel(object):
             print("Gen dense layer input shape: {}".format(x.shape))
             x = tf.layers.dense(x,
                                 self.dataset.height * self.dataset.width * filters_num // (2 ** (2 * num_layers)),
-                                kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                                kernel_initializer=tf.random_normal_initializer())
             print("Gen reshape layer input shape: {}".format(x.shape))
             x = tf.reshape(x, [-1, self.dataset.height // 2 ** num_layers, self.dataset.width // 2 ** num_layers,
                                filters_num])
@@ -249,32 +249,24 @@ class DCGANModel(object):
         count = 0
         for row in range(rows):
             for col in range(cols):
-                # print(0.5*samples[count] + 0.5)
+                # print(np.max(samples[count]), np.min(samples[count]))
                 axes[row, col].imshow(np.clip(0.5 * samples[count] + 0.5, 0, 1).squeeze(), interpolation='nearest')
                 axes[row, col].axis('off')
                 count += 1
-        images_path = images_path if images_path else self.sample_images_path + "\sample_%d.png" % epoch
+        images_path = images_path if images_path else self.sample_images_path + "/sample_%d.png" % epoch
         fig.savefig(images_path)
         plt.close()
 
     def test(self):
-        self.session.run(tf.global_variables_initializer())
-        # self.sample_images(1)
-        next_element = self.dataset.iterator.get_next()
-        batch_x = self.session.run(next_element)
-        # z = np.random.normal(0, 1., size=[25, self.noise_dim])
-        # samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
-        # print(samples.shape)
-        # print(samples[0,30,:,0]*127.5+127.5)
         rows = 5
         cols = 5
+        z = np.random.uniform(-1, 1, size=[rows * cols, 64, 64, 3])
         fig, axes = plt.subplots(rows, cols, figsize=(8, 8), dpi=100)
         count = 0
         for row in range(rows):
             for col in range(cols):
-                ia = batch_x[count]
-                print(ia)
-                axes[row, col].imshow(0.5 * ia + 0.5, interpolation='nearest')
+                print(np.max(z[count]), np.min(z[count]))
+                axes[row, col].imshow((0.5 * z[count] + 0.5).squeeze(), interpolation='nearest')
                 axes[row, col].axis('off')
                 count += 1
         images_path = self.sample_images_path + "/sample_test.png"
@@ -283,10 +275,6 @@ class DCGANModel(object):
 
     def test2(self):
         self.session.run(tf.global_variables_initializer())
-        next_element = self.dataset.iterator.get_next()
-        batch_x = self.session.run(next_element)
-        print(batch_x.shape)
-        print(batch_x[0])
 
 
 if __name__ == "__main__":
