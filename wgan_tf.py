@@ -12,7 +12,8 @@ from dcgan_tf import GANDataSet
 class WGANModel(object):
     def __init__(self, session=tf.Session(), noise_dim=100, cri_latent_dim=128, gen_latent_dim=128, kernel_size=5,
                  gen_learning_rate=0.00005, cri_learning_rate=0.00005, momentum=0.8, dropout=0, num_critic=5,
-                 clip_value=0.01, model_path=None, sample_images_path=None, dataset: GANDataSet = None):
+                 clip_value=0.01, model_path=None, sample_images_path=None, summaries_path=None,
+                 dataset: GANDataSet = None):
         self.session = session
         self.noise_dim = noise_dim
         self.cri_latent_dim = cri_latent_dim
@@ -27,7 +28,9 @@ class WGANModel(object):
         self.clamp_lower = -clip_value
         self.model_path = model_path
         self.sample_images_path = sample_images_path
+        self.summaries_path = summaries_path
         self.dataset = dataset
+        self.train_writer = tf.summary.FileWriter(self.summaries_path + '/train', self.session.graph)
 
         self.saver = None
         self.is_restore = False
@@ -41,6 +44,8 @@ class WGANModel(object):
         self.train_gen_op = None
         self.train_cri_op = None
         self.clip_op = None
+        self.cri_sum_merged = None
+        self.gen_sum_merged = None
 
     def generator(self, x, reuse=False):
         with tf.variable_scope('Generator', reuse=reuse):
@@ -57,7 +62,7 @@ class WGANModel(object):
             print("Gen reshape layer input shape: {}".format(x.shape))
             x = tf.reshape(x, [-1, self.dataset.height // 2 ** num_layers, self.dataset.width // 2 ** num_layers,
                                filters_num])
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum, training=True)
             x = tf.nn.relu(x)
 
             for i in range(1, num_layers + 1):
@@ -71,7 +76,7 @@ class WGANModel(object):
                 x = tf.layers.conv2d_transpose(x, filters=int(filters_num), kernel_size=self.kernel_size,
                                                strides=strides_num, padding=padding_type,
                                                kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-                x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
+                x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum, training=True)
                 if i < num_layers:
                     x = tf.nn.relu(x)
                 else:
@@ -94,7 +99,7 @@ class WGANModel(object):
                 x = tf.layers.conv2d(x, filters=filters_num, kernel_size=self.kernel_size, strides=strides_num,
                                      padding=padding_type, kernel_initializer=tf.random_normal_initializer(stddev=0.02))
                 if i > 1:
-                    x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum)
+                    x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum, training=True)
                 x = tf.nn.leaky_relu(x)
                 x = tf.layers.dropout(x, rate=self.dropout)
                 filters_num *= 2
@@ -119,7 +124,9 @@ class WGANModel(object):
         stacked_gan = self.critic(self.gen_samples, reuse=True)
 
         self.cri_loss = tf.reduce_mean(fake_logits - real_logits)
+        cri_loss_sum = tf.summary.scalar('C_loss', self.cri_loss)
         self.gen_loss = tf.reduce_mean(-stacked_gan)
+        gen_loss_sum = tf.summary.scalar('G_loss', self.gen_loss)
 
         optimizer_gen = tf.train.RMSPropOptimizer(learning_rate=self.gen_learning_rate)
         optimizer_cri = tf.train.RMSPropOptimizer(learning_rate=self.cri_learning_rate)
@@ -133,6 +140,8 @@ class WGANModel(object):
         clip_ops_list = [tf.assign(var, tf.clip_by_value(var, self.clamp_lower, self.clamp_upper)) for var in cri_vars]
         self.clip_op = tf.group(*clip_ops_list)
 
+        self.cri_sum_merged = tf.summary.merge([cri_loss_sum])
+        self.gen_sum_merged = tf.summary.merge([gen_loss_sum])
         self.saver = tf.train.Saver()
 
     def restore_model(self):
@@ -157,13 +166,17 @@ class WGANModel(object):
                 z = np.random.uniform(-1, 1, [batch_size, self.noise_dim])
                 feed_dict = {self.real_image_input: batch_x, self.noise_input: z}
                 # _, _, cri_loss = self.session.run([self.train_cri_op, self.clip_op, self.cri_loss], feed_dict=feed_dict)
-                _, cri_loss = self.session.run([self.train_cri_op, self.cri_loss], feed_dict=feed_dict)
+                _, cri_loss, cri_sum = self.session.run(
+                    [self.train_cri_op, self.cri_loss, self.cri_sum_merged], feed_dict=feed_dict)
                 self.session.run(self.clip_op)
+            self.train_writer.add_summary(cri_sum, step)
 
             # training generator
             z = np.random.uniform(-1, 1, [batch_size * 2, self.noise_dim])
             feed_dict = {self.noise_input: z}
-            _, gen_loss = self.session.run([self.train_gen_op, self.gen_loss], feed_dict=feed_dict)
+            _, gen_loss, gen_sum = self.session.run(
+                [self.train_gen_op, self.gen_loss, self.gen_sum_merged], feed_dict=feed_dict)
+            self.train_writer.add_summary(gen_sum, step)
 
             epoch = int(math.ceil(step / steps_one_epoch))
             print(
@@ -192,14 +205,19 @@ class WGANModel(object):
 
 
 if __name__ == "__main__":
+    gds = GANDataSet(data_path='D://deep_learning/datasets/sheephead', height=64, width=64)
+    wgm = WGANModel(model_path='D://deep_learning/models/sheephead/sheephead.ckpt',
+                    sample_images_path='D://deep_learning/samples',
+                    summaries_path='D://deep_learning/summaries/sheephead',
+                    dataset=gds)
     if sys.argv[1] == 'train':
-        gds = GANDataSet(data_path='D://deep_learning/datasets/sheephead', height=64, width=64)
-        wgm = WGANModel(model_path='D://deep_learning/models/sheephead/sheephead.ckpt',
-                        sample_images_path='D://deep_learning/samples',
-                        dataset=gds)
         wgm.build_model()
         wgm.restore_model()
         wgm.train_model(num_epochs=100)
+    elif sys.argv[1] == 'sample':
+        wgm.build_model()
+        wgm.restore_model()
+        wgm.sample_images(epoch='test')
     elif sys.argv[1] == 'test':
         gds = GANDataSet()
         dgm = WGANModel(model_path='D://deep_learning/models/mnist/mnist.ckpt',
