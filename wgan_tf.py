@@ -189,7 +189,7 @@ class WGANModel(object):
     def sample_images(self, epoch, images_path=None):
         rows = 5
         cols = 5
-        fig, axes = plt.subplots(rows, cols, figsize=(8, 8), dpi=100)
+        fig, axes = plt.subplots(rows, cols, figsize=(4, 4), dpi=160)
         z = np.random.uniform(-1, 1, size=[rows * cols, self.noise_dim])
         samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
         count = 0

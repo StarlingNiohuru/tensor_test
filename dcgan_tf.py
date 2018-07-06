@@ -253,7 +253,7 @@ class DCGANModel(object):
     def sample_images(self, epoch, images_path=None):
         rows = 5
         cols = 5
-        fig, axes = plt.subplots(rows, cols, figsize=(8, 8), dpi=100)
+        fig, axes = plt.subplots(rows, cols, figsize=(3, 3), dpi=160)
         z = np.random.uniform(-1, 1, size=[rows * cols, self.noise_dim])
         samples = self.session.run(self.gen_samples, feed_dict={self.noise_input: z})
         count = 0
@@ -271,7 +271,7 @@ class DCGANModel(object):
         rows = 5
         cols = 5
         z = np.random.uniform(-1, 1, size=[rows * cols, 64, 64, 3])
-        fig, axes = plt.subplots(rows, cols, figsize=(8, 8), dpi=100)
+        fig, axes = plt.subplots(rows, cols, figsize=(4, 4), dpi=160)
         count = 0
         for row in range(rows):
             for col in range(cols):
