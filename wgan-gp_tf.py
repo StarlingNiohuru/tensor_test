@@ -68,7 +68,7 @@ class GANDataSet(object):
 
 
 class WGANGPModel(object):
-    def __init__(self, session=tf.Session(), noise_dim=100, latent_dim=64, kernel_size=3, disc_iters=5, gp_lambda=10,
+    def __init__(self, session=tf.Session(), noise_dim=128, latent_dim=64, kernel_size=3, disc_iters=5, gp_lambda=10,
                  model_path=None, sample_images_path=None, summaries_path=None, dataset: GANDataSet = None):
         self.session = session
         self.noise_dim = noise_dim
@@ -98,38 +98,40 @@ class WGANGPModel(object):
 
     def generator(self, x, reuse=False):
         with tf.variable_scope('Generator', reuse=reuse):
-            strides_num = 1
-            padding_type = 'valid'
-            num_layers = math.ceil(math.log2(int(min(self.dataset.height, self.dataset.width)) / self.kernel_size))
-            num_layers = min(int(num_layers), 4)
-            filters_num = 2 ** (num_layers - 1) * self.gen_latent_dim
-
-            print("Gen dense layer input shape: {}".format(x.shape))
-            x = tf.layers.dense(x,
-                                self.dataset.height * self.dataset.width * filters_num // (2 ** (2 * num_layers)),
-                                kernel_initializer=tf.random_normal_initializer())
+            print("Gen input shape: {}".format(x.shape))
+            x = tf.layers.dense(x, 4 * 4 * 8 * self.latent_dim, kernel_initializer=tf.random_normal_initializer(0.02))
             print("Gen reshape layer input shape: {}".format(x.shape))
-            x = tf.reshape(x, [-1, self.dataset.height // 2 ** num_layers, self.dataset.width // 2 ** num_layers,
-                               filters_num])
-            x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum, training=True)
-            x = tf.nn.relu(x)
-
+            x = tf.reshape(x, [-1, 4, 4, 8 * self.latent_dim])
+            num_layers = 4
+            filter_list = [8, 4, 2, 1]
             for i in range(1, num_layers + 1):
-                print("Gen conv_trans layer-{} input shape: {}".format(i, x.shape))
-                filters_num /= 2
-                if i > 1:
-                    strides_num = 2
-                    padding_type = 'same'
-                if i == num_layers:
-                    filters_num = self.dataset.channels
-                x = tf.layers.conv2d_transpose(x, filters=int(filters_num), kernel_size=self.kernel_size,
-                                               strides=strides_num, padding=padding_type,
-                                               kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-                x = tf.layers.batch_normalization(x, epsilon=1e-5, momentum=self.momentum, training=True)
-                if i < num_layers:
+                print("Gen residual block-{} input shape: {}".format(i, x.shape))
+                with tf.variable_scope("GenResidualBlock-{}".format(i)):
+                    shortcut = x
+                    shortcut = tf.layers.conv2d_transpose(shortcut, filters=filter_list[i - 1] * self.latent_dim,
+                                                          kernel_size=self.kernel_size, padding='same',
+                                                          kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                    x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True)
                     x = tf.nn.relu(x)
-                else:
-                    x = tf.nn.tanh(x)
+                    x = tf.layers.conv2d_transpose(x, filters=filter_list[i - 1] * self.latent_dim,
+                                                   kernel_size=self.kernel_size, padding='same',
+                                                   kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                    print(x.shape)
+                    x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True)
+                    x = tf.nn.relu(x)
+                    outputs = tf.layers.conv2d_transpose(x, filters=filter_list[i - 1] * self.latent_dim,
+                                                         kernel_size=self.kernel_size, padding='same',
+                                                         kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                    x = shortcut + outputs
+
+            x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True)
+            x = tf.nn.relu(x)
+            print("Gen last conv_trans input shape: {}".format(x.shape))
+            x = tf.layers.conv2d_transpose(x, filters=3, kernel_size=self.kernel_size, padding='same',
+                                           kernel_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           activation=tf.nn.tanh)
+            print("Gen reshape layer input shape: {}".format(x.shape))
+            x = tf.reshape(x, [-1, 64 * 64 * 3])
             print("Gen output shape: {}".format(x.shape))
             return x
 
@@ -139,22 +141,23 @@ class WGANGPModel(object):
             x = tf.layers.conv2d(x, filters=self.latent_dim, kernel_size=self.kernel_size,
                                  padding='same', kernel_initializer=tf.random_normal_initializer(stddev=0.02))
             num_layers = 4
+            filter_list = [2, 4, 8, 8]
             for i in range(1, num_layers + 1):
                 print("Disc residual block-{} input shape: {}".format(i, x.shape))
                 with tf.variable_scope("DiscResidualBlock-{}".format(i)):
                     shortcut = x
                     shortcut = tf.layers.average_pooling2d(shortcut, pool_size=2, strides=2)
-                    shortcut = tf.layers.conv2d(shortcut, filters=2 ** i * self.latent_dim,
+                    shortcut = tf.layers.conv2d(shortcut, filters=filter_list[i - 1] * self.latent_dim,
                                                 kernel_size=self.kernel_size, padding='same',
                                                 kernel_initializer=tf.random_normal_initializer(stddev=0.02))
 
-                    x = tf.layers.batch_normalization(x, epsilon=1e-5)
+                    x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True, trainable=False)
                     x = tf.nn.relu(x)
-                    x = tf.layers.conv2d(x, filters=2 ** i * self.latent_dim, kernel_size=self.kernel_size,
+                    x = tf.layers.conv2d(x, filters=filter_list[i - 1] * self.latent_dim, kernel_size=self.kernel_size,
                                          padding='same', kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-                    x = tf.layers.batch_normalization(x, epsilon=1e-5)
+                    x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True, trainable=False)
                     x = tf.nn.relu(x)
-                    x = tf.layers.conv2d(x, filters=2 ** i * self.latent_dim, kernel_size=self.kernel_size,
+                    x = tf.layers.conv2d(x, filters=filter_list[i - 1] * self.latent_dim, kernel_size=self.kernel_size,
                                          padding='same', kernel_initializer=tf.random_normal_initializer(stddev=0.02))
                     outputs = tf.layers.average_pooling2d(x, pool_size=2, strides=2)
                     x = shortcut + outputs
@@ -264,6 +267,8 @@ class WGANGPModel(object):
         self.real_image_input = tf.placeholder(tf.float32, shape=[None, self.dataset.height, self.dataset.width,
                                                                   self.dataset.channels])
         self.discriminator(self.real_image_input)
+        self.noise_input = tf.placeholder(tf.float32, shape=[None, self.noise_dim])
+        self.gen_samples = self.generator(self.noise_input)
 
 
 if __name__ == "__main__":
