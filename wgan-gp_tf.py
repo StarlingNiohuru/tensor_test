@@ -40,10 +40,11 @@ class GANDataSet(object):
         image_string = tf.read_file(filename)
         image_decoded = tf.image.decode_jpeg(image_string, channels=self.channels)
         image_resized = tf.image.resize_images(image_decoded, [self.height, self.width])
-        image_noisy = image_resized + np.random.normal(0, 1.0, image_resized.shape)
-        image_noisy = tf.clip_by_value(image_noisy, 0, 255)
-        image_normal = (tf.cast(image_noisy, tf.float32) - 127.5) / 127.5
-        return image_normal
+        # image_noisy = image_resized + np.random.normal(0, 1.0, image_resized.shape)
+        # image_noisy = tf.clip_by_value(image_noisy, 0, 255)
+        # image_normal = (tf.cast(image_noisy, tf.float32) - 127.5) / 127.5
+        # return image_normal
+        return image_resized
 
     def build_dataset(self):
         fname_list = [self.data_path + '/' + fname for fname in os.listdir(self.data_path)]
@@ -108,20 +109,22 @@ class WGANGPModel(object):
                 print("Gen residual block-{} input shape: {}".format(i, x.shape))
                 with tf.variable_scope("GenResidualBlock-{}".format(i)):
                     shortcut = x
+                    # unpool+conv
                     shortcut = tf.layers.conv2d_transpose(shortcut, filters=filter_list[i - 1] * self.latent_dim,
-                                                          kernel_size=self.kernel_size, padding='same',
+                                                          kernel_size=self.kernel_size, padding='same', strides=2,
                                                           kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+
                     x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True)
                     x = tf.nn.relu(x)
+                    # unpool+conv
                     x = tf.layers.conv2d_transpose(x, filters=filter_list[i - 1] * self.latent_dim,
-                                                   kernel_size=self.kernel_size, padding='same',
+                                                   kernel_size=self.kernel_size, padding='same', strides=2,
                                                    kernel_initializer=tf.random_normal_initializer(stddev=0.02))
-                    print(x.shape)
                     x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True)
                     x = tf.nn.relu(x)
-                    outputs = tf.layers.conv2d_transpose(x, filters=filter_list[i - 1] * self.latent_dim,
-                                                         kernel_size=self.kernel_size, padding='same',
-                                                         kernel_initializer=tf.random_normal_initializer(stddev=0.02))
+                    outputs = tf.layers.conv2d(x, filters=filter_list[i - 1] * self.latent_dim,
+                                               kernel_size=self.kernel_size, padding='same',
+                                               kernel_initializer=tf.random_normal_initializer(stddev=0.02))
                     x = shortcut + outputs
 
             x = tf.layers.batch_normalization(x, epsilon=1e-5, training=True)
@@ -131,8 +134,8 @@ class WGANGPModel(object):
                                            kernel_initializer=tf.random_normal_initializer(stddev=0.02),
                                            activation=tf.nn.tanh)
             print("Gen reshape layer input shape: {}".format(x.shape))
-            x = tf.reshape(x, [-1, 64 * 64 * 3])
-            print("Gen output shape: {}".format(x.shape))
+            # x = tf.reshape(x, [-1, 64 * 64 * 3])
+            # print("Gen output shape: {}".format(x.shape))
             return x
 
     def discriminator(self, x, reuse=False):
@@ -180,14 +183,14 @@ class WGANGPModel(object):
         fake_logits = self.discriminator(self.gen_samples, reuse=True)
 
         self.disc_loss = tf.reduce_mean(fake_logits - real_logits)
-        disc_loss_sum = tf.summary.scalar('C_loss', self.disc_loss)
+        disc_loss_sum = tf.summary.scalar('D_loss', self.disc_loss)
         self.gen_loss = tf.reduce_mean(-fake_logits)
         gen_loss_sum = tf.summary.scalar('G_loss', self.gen_loss)
 
-        alpha = tf.random_uniform(shape=[self.dataset.batch_size, 1], minval=0., maxval=1.)
+        alpha = tf.random_uniform(shape=tf.shape(self.real_image_input), minval=0., maxval=1.)
         differences = self.gen_samples - self.real_image_input
         interpolates = self.real_image_input + (alpha * differences)
-        gradients = tf.gradients(self.discriminator(interpolates), [interpolates])[0]
+        gradients = tf.gradients(self.discriminator(interpolates, reuse=True), [interpolates])[0]
         slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
         gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2)
         self.disc_loss += self.gp_lambda * gradient_penalty
@@ -226,7 +229,7 @@ class WGANGPModel(object):
             for _ in range(self.disc_iters):
                 z = np.random.uniform(-1, 1, [batch_size, self.noise_dim])
                 feed_dict = {self.real_image_input: batch_x, self.noise_input: z}
-                # _, _, disc_loss = self.session.run([self.train_disc_op, self.clip_op, self.disc_loss], feed_dict=feed_dict)
+                # _, disc_loss = self.session.run([self.train_disc_op, self.disc_loss], feed_dict=feed_dict)
                 _, disc_loss, disc_sum = self.session.run(
                     [self.train_disc_op, self.disc_loss, self.disc_sum_merged], feed_dict=feed_dict)
             self.train_writer.add_summary(disc_sum, step)
@@ -280,7 +283,7 @@ if __name__ == "__main__":
     if sys.argv[1] == 'train':
         wgm.build_model()
         wgm.restore_model()
-        wgm.train_model(num_epochs=100)
+        wgm.train_model(num_epochs=1000)
     elif sys.argv[1] == 'sample':
         wgm.build_model()
         wgm.restore_model()
